@@ -19,7 +19,7 @@ import queue
 import tempfile
 import base64
 from urllib.parse import urljoin, urlencode
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
@@ -375,22 +375,35 @@ class Worker:
         raise TimeoutError("Dịch vụ TTS quá thời gian chờ 30 phút")
 
     def _srt_api_generate(self, engine: str, params: dict[str, Any], entries: list[Any]) -> dict[str, Any]:
-        output_dir = Path(str(params.get("outputDir", ""))).resolve(); output_dir.mkdir(parents=True, exist_ok=True); items = []
+        output_dir = Path(str(params.get("outputDir", ""))).resolve(); output_dir.mkdir(parents=True, exist_ok=True)
+        workers = min(8, max(1, int(params.get("apiWorkers", 3)))); items = []; pending: list[tuple[dict[str, Any], Path]] = []
         for position, raw in enumerate(entries, 1):
             if not isinstance(raw, dict) or not str(raw.get("text", "")).strip(): continue
             entry = {**raw, "id": int(raw.get("id", position)), "text": str(raw["text"]).strip()}; output = output_dir / f"{entry['id']:04d}.wav"
             if bool(params.get("skipExisting", True)) and output.is_file():
                 with wave.open(str(output), "rb") as wav: duration = wav.getnframes() / max(1, wav.getframerate())
-                item = {**entry, "status": "completed", "file": str(output), "duration": round(duration, 2), "skipped": True}
-            else:
-                last_error = None; item = None
-                for attempt in range(1, 4):
-                    emit({"event": "srt.voice.progress", "data": {"event": "attempt", "id": entry["id"], "attempt": attempt}})
-                    try: item = self._api_generate_one(engine, entry, params, output); break
-                    except Exception as exc: last_error = exc
-                if item is None: item = {**entry, "status": "failed", "error": str(last_error), "engine": engine}
-            items.append(item); emit({"event": "srt.voice.progress", "data": {"event": "progress", "done": len(items), "total": len(entries), "item": item}})
-        manifest = output_dir / "manifest.json"; manifest.write_text(json.dumps({"engine": engine, "items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
+                items.append({**entry, "status": "completed", "file": str(output), "duration": round(duration, 2), "skipped": True})
+            else: pending.append((entry, output))
+
+        def generate_one(job: tuple[dict[str, Any], Path]) -> dict[str, Any]:
+            entry, output = job; last_error = None
+            for attempt in range(1, 4):
+                emit({"event": "srt.voice.progress", "data": {"event": "attempt", "id": entry["id"], "attempt": attempt}})
+                try: return self._api_generate_one(engine, entry, params, output)
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < 3: time.sleep(attempt)
+            return {**entry, "status": "failed", "error": str(last_error), "engine": engine}
+
+        total = len(items) + len(pending); done = len(items)
+        for item in items: emit({"event": "srt.voice.progress", "data": {"event": "progress", "done": done, "total": total, "item": item, "workers": workers}})
+        with ThreadPoolExecutor(max_workers=min(workers, max(1, len(pending)))) as executor:
+            futures = [executor.submit(generate_one, job) for job in pending]
+            for future in as_completed(futures):
+                item = future.result(); items.append(item); done += 1
+                emit({"event": "srt.voice.progress", "data": {"event": "progress", "done": done, "total": total, "item": item, "workers": workers}})
+        items.sort(key=lambda item: int(item.get("id", 0)))
+        manifest = output_dir / "manifest.json"; manifest.write_text(json.dumps({"engine": engine, "workers": workers, "items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
         completed = sum(x.get("status") == "completed" for x in items)
         return {"outputDir": str(output_dir), "manifestPath": str(manifest), "items": items, "completed": completed, "failed": len(items)-completed, "total": len(items)}
 
