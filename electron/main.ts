@@ -20,6 +20,7 @@ const createWindow = async () => {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      defaultEncoding: 'UTF-8',
     },
   });
   await window.loadURL('http://localhost:5173');
