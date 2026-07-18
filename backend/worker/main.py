@@ -16,6 +16,8 @@ import urllib.request
 import mimetypes
 import uuid
 import queue
+import tempfile
+from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
@@ -42,6 +44,9 @@ class Worker:
             "settings.get": self.settings_get,
             "settings.voice.save": self.voice_settings_save,
             "settings.voice.test": self.voice_settings_test,
+            "settings.tts.get": self.tts_settings_get,
+            "settings.tts.save": self.tts_settings_save,
+            "settings.tts.test": self.tts_settings_test,
             "subtitle.parse": self.subtitle_parse,
             "subtitle.save": self.subtitle_save,
             "subtitle.translate": self.subtitle_translate,
@@ -215,6 +220,115 @@ class Worker:
         runtime = result.get("runtime", {})
         return {"ok": bool(result.get("ok")), "device": runtime.get("device") or "gpu",
                 "status": runtime.get("status") or "unknown", "detail": runtime.get("detail") or ""}
+
+    def _tts_api_config(self) -> dict[str, str]:
+        try: value = json.loads((self.user_data / "tts-api-settings.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError): value = {}
+        return {"ai33Key": str(value.get("ai33Key", "")), "aimaxKey": str(value.get("aimaxKey", ""))}
+
+    def tts_settings_get(self, _params: dict[str, Any]) -> dict[str, bool]:
+        value = self._tts_api_config()
+        return {"ai33Configured": bool(value["ai33Key"]), "aimaxConfigured": bool(value["aimaxKey"])}
+
+    def tts_settings_save(self, params: dict[str, Any]) -> dict[str, bool]:
+        value = self._tts_api_config()
+        for key in ("ai33Key", "aimaxKey"):
+            if str(params.get(key, "")).strip(): value[key] = str(params[key]).strip()
+        (self.user_data / "tts-api-settings.json").write_text(json.dumps(value, indent=2), encoding="utf-8")
+        return self.tts_settings_get({})
+
+    def _api_json(self, url: str, headers: dict[str, str], method: str = "GET", fields: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+        data = None; request_headers = {"User-Agent": "HHVietSub/0.1", **headers}
+        if fields is not None:
+            boundary = f"----HHVietSub{uuid.uuid4().hex}"; body = bytearray()
+            for key, value in fields.items():
+                rendered = str(value).lower() if isinstance(value, bool) else str(value)
+                body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{rendered}\r\n'.encode("utf-8"))
+            body.extend(f"--{boundary}--\r\n".encode("ascii")); data = bytes(body)
+            request_headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=request_headers, method=method), timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"API ({exc.code}): {detail[:600]}") from exc
+        except urllib.error.URLError as exc: raise RuntimeError(f"Không thể kết nối dịch vụ TTS: {exc.reason}") from exc
+
+    def tts_settings_test(self, params: dict[str, Any]) -> dict[str, Any]:
+        provider = str(params.get("provider", "")); supplied = str(params.get("key", "")).strip()
+        if supplied: self.tts_settings_save({"ai33Key" if provider == "ai33" else "aimaxKey": supplied})
+        keys = self._tts_api_config()
+        if provider == "ai33":
+            if not keys["ai33Key"]: raise ValueError("Chưa nhập API key AI33")
+            self._api_json("https://api.ai33.pro/v3/voices?provider=edge&page=1&page_size=1", {"xi-api-key": keys["ai33Key"]})
+        elif provider == "aimax":
+            if not keys["aimaxKey"]: raise ValueError("Chưa nhập API key AIMax")
+            self._api_json("https://www.aimaxstudio.com/api/v1/voices?limit=1", {"X-API-Key": keys["aimaxKey"]})
+        else: raise ValueError("Dịch vụ API không hợp lệ")
+        return {"ok": True, "provider": provider}
+
+    def _download_api_audio(self, url: str, destination: Path) -> float:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "HHVietSub/0.1"}), timeout=180) as response: audio = response.read()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if audio[:4] == b"RIFF": destination.write_bytes(audio)
+        else:
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                try:
+                    import imageio_ffmpeg
+                    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+                except (ImportError, RuntimeError): ffmpeg = None
+            if not ffmpeg: raise RuntimeError("Cần FFmpeg để chuyển audio API thành WAV")
+            with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as temp: temp.write(audio); temp_path = Path(temp.name)
+            try: subprocess.run([ffmpeg, "-y", "-i", str(temp_path), "-ac", "1", "-ar", "24000", str(destination)], check=True, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            finally: temp_path.unlink(missing_ok=True)
+        with wave.open(str(destination), "rb") as wav: return wav.getnframes() / max(1, wav.getframerate())
+
+    def _api_generate_one(self, engine: str, entry: dict[str, Any], params: dict[str, Any], output: Path) -> dict[str, Any]:
+        keys = self._tts_api_config(); voice_id = str(params.get("apiVoiceId", "")).strip()
+        if not voice_id: raise ValueError("Chưa nhập Voice ID của dịch vụ API")
+        speed = float(params.get("speed", 1.0)); provider = str(params.get("apiProvider", "minimax")); model = str(params.get("apiModel", ""))
+        if engine == "ai33":
+            if not keys["ai33Key"]: raise ValueError("Chưa lưu API key AI33 trong Cấu hình")
+            created = self._api_json("https://api.ai33.pro/v3/text-to-speech", {"xi-api-key": keys["ai33Key"]}, "POST", {"text": entry["text"], "voice_id": voice_id, "speed": min(1.5, max(.5, speed)), "with_transcript": False})
+            job_id = created.get("task_id"); poll_url = f"https://api.ai33.pro/v1/task/{job_id}"; headers = {"xi-api-key": keys["ai33Key"]}; base = "https://api.ai33.pro"
+        else:
+            if not keys["aimaxKey"]: raise ValueError("Chưa lưu API key AIMax trong Cấu hình")
+            created = self._api_json("https://www.aimaxstudio.com/api/v1/tts/generate", {"X-API-Key": keys["aimaxKey"]}, "POST", {"provider": provider, "voice_id": voice_id, "text": entry["text"], "speed": speed, "model": model, "language": "Vietnamese", "normalize": True, "enable_srt": False})
+            job_id = created.get("job_id"); poll_url = f"https://www.aimaxstudio.com/api/v1/tts/jobs/{job_id}"; headers = {"X-API-Key": keys["aimaxKey"]}; base = "https://www.aimaxstudio.com"
+        if not job_id: raise RuntimeError("Dịch vụ không trả về mã tác vụ")
+        deadline = time.time() + 1800
+        while time.time() < deadline:
+            status = self._api_json(poll_url, headers); state = str(status.get("status", "")).lower()
+            if state in {"done", "completed", "success", "succeeded"}:
+                metadata = status.get("metadata") if isinstance(status.get("metadata"), dict) else {}
+                audio_url = status.get("audio_url") or status.get("output_uri") or metadata.get("audio_url") or metadata.get("output_uri")
+                if not audio_url: raise RuntimeError("Tác vụ hoàn tất nhưng không có URL audio")
+                duration = self._download_api_audio(urljoin(base, str(audio_url)), output)
+                return {**entry, "status": "completed", "file": str(output), "duration": round(duration, 2), "engine": engine}
+            if state in {"failed", "error", "cancelled", "canceled"}: raise RuntimeError(str(status.get("error_message") or status.get("message") or "Tác vụ TTS thất bại"))
+            time.sleep(2)
+        raise TimeoutError("Dịch vụ TTS quá thời gian chờ 30 phút")
+
+    def _srt_api_generate(self, engine: str, params: dict[str, Any], entries: list[Any]) -> dict[str, Any]:
+        output_dir = Path(str(params.get("outputDir", ""))).resolve(); output_dir.mkdir(parents=True, exist_ok=True); items = []
+        for position, raw in enumerate(entries, 1):
+            if not isinstance(raw, dict) or not str(raw.get("text", "")).strip(): continue
+            entry = {**raw, "id": int(raw.get("id", position)), "text": str(raw["text"]).strip()}; output = output_dir / f"{entry['id']:04d}.wav"
+            if bool(params.get("skipExisting", True)) and output.is_file():
+                with wave.open(str(output), "rb") as wav: duration = wav.getnframes() / max(1, wav.getframerate())
+                item = {**entry, "status": "completed", "file": str(output), "duration": round(duration, 2), "skipped": True}
+            else:
+                last_error = None; item = None
+                for attempt in range(1, 4):
+                    emit({"event": "srt.voice.progress", "data": {"event": "attempt", "id": entry["id"], "attempt": attempt}})
+                    try: item = self._api_generate_one(engine, entry, params, output); break
+                    except Exception as exc: last_error = exc
+                if item is None: item = {**entry, "status": "failed", "error": str(last_error), "engine": engine}
+            items.append(item); emit({"event": "srt.voice.progress", "data": {"event": "progress", "done": len(items), "total": len(entries), "item": item}})
+        manifest = output_dir / "manifest.json"; manifest.write_text(json.dumps({"engine": engine, "items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
+        completed = sum(x.get("status") == "completed" for x in items)
+        return {"outputDir": str(output_dir), "manifestPath": str(manifest), "items": items, "completed": completed, "failed": len(items)-completed, "total": len(items)}
 
     def _launch_chrome(self, url: str) -> dict[str, Any]:
         settings = self.settings_get({})["gemini"]
@@ -498,10 +612,16 @@ class Worker:
 
     def srt_voice_generate(self, params: dict[str, Any]) -> dict[str, Any]:
         entries = params.get("entries")
+        engine = str(params.get("engine", "omnivoice")).lower()
         voice_id = str(params.get("voiceId", "")).strip()
         if not isinstance(entries, list) or not entries:
             raise ValueError("Không có câu phụ đề để tạo giọng")
-        if self._voice_config()["mode"] == "colab":
+        if engine in {"ai33", "aimax"}:
+            return self._srt_api_generate(engine, params, entries)
+        if engine != "omnivoice":
+            raise ValueError("Mô hình tạo giọng không hợp lệ")
+        # Tạo từ SRT dùng OmniVoice cục bộ; Colab không được chọn ngầm từ cấu hình chung.
+        if False and self._voice_config()["mode"] == "colab":
             voice_id = str(params.get("voiceId", "")).strip()
             output_value = str(params.get("outputDir", "")).strip()
             output_dir = Path(output_value).resolve() if output_value else self.user_data / "srt-voice-output"
