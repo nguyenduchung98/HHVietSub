@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import logging
 import re
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import time
 import wave
+import zipfile
 import urllib.error
 import urllib.request
 import mimetypes
@@ -458,6 +460,42 @@ class Worker:
         return {"duration": round(duration, 2), "generationTime": round(time.perf_counter() - started, 2),
                 "seed": int(headers.get("X-Seed", seed))}
 
+    def _remote_generate_batch(self, entries: list[dict[str, Any]], voice_id: str,
+                               params: dict[str, Any], output_dir: Path) -> list[dict[str, Any]]:
+        voice_dir = LEGACY_OMNIVOICE / "voices" / voice_id
+        profile = json.loads((voice_dir / "profile.json").read_text(encoding="utf-8"))
+        prompt_path = voice_dir / str(profile.get("voice_prompt", "voice.pt"))
+        if not prompt_path.is_file():
+            raise FileNotFoundError("Hồ sơ giọng chưa có voice.pt để tạo batch nhanh trên Colab")
+        fields = {
+            "entries": json.dumps(entries, ensure_ascii=False),
+            "language": str(params.get("language", "vi")), "speed": float(params.get("speed", 1.0)),
+            "num_step": int(params.get("steps", 32)), "guidance_scale": float(params.get("guidance", 2.0)),
+            "denoise": str(bool(params.get("denoise", False))).lower(),
+            "postprocess_output": str(bool(params.get("postprocess", True))).lower(),
+        }
+        if str(params.get("seed") or "").strip():
+            fields["seed"] = int(params["seed"])
+        raw, _ = self._remote_request("/generate-batch", fields, {"voice_prompt": prompt_path}, timeout=30 * 60)
+        with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
+            names = set(bundle.namelist())
+            if "manifest.json" not in names:
+                raise RuntimeError("Colab không trả về manifest batch")
+            manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
+            items = manifest.get("items", []) if isinstance(manifest, dict) else []
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for item in items:
+                if not isinstance(item, dict) or item.get("status") != "completed":
+                    continue
+                filename = f"{int(item['id']):04d}.wav"
+                if filename not in names:
+                    item.update(status="failed", error="Batch thiếu file WAV")
+                    continue
+                destination = output_dir / filename
+                destination.write_bytes(bundle.read(filename))
+                item["file"] = str(destination)
+        return items
+
     def srt_voice_generate(self, params: dict[str, Any]) -> dict[str, Any]:
         entries = params.get("entries")
         voice_id = str(params.get("voiceId", "")).strip()
@@ -467,22 +505,24 @@ class Worker:
             voice_id = str(params.get("voiceId", "")).strip()
             output_value = str(params.get("outputDir", "")).strip()
             output_dir = Path(output_value).resolve() if output_value else self.user_data / "srt-voice-output"
-            output_dir.mkdir(parents=True, exist_ok=True); items = []
+            output_dir.mkdir(parents=True, exist_ok=True); items = []; pending = []
             for position, entry in enumerate(entries, 1):
                 if not isinstance(entry, dict) or not str(entry.get("text", "")).strip(): continue
-                item_id = int(entry.get("id", position)); output = output_dir / f"{item_id:04d}.wav"; result = None; error = ""
+                item_id = int(entry.get("id", position)); output = output_dir / f"{item_id:04d}.wav"
+                normalized = {**entry, "id": item_id, "text": str(entry["text"]).strip()}
                 if bool(params.get("skipExisting", True)) and output.is_file():
                     with wave.open(str(output), "rb") as wav: duration = wav.getnframes() / max(1, wav.getframerate())
-                    result = {"duration": round(duration, 2)}
+                    items.append({**normalized, "status": "completed", "file": str(output),
+                                  "duration": round(duration, 2), "skipped": True})
                 else:
-                    for attempt in range(3):
-                        try:
-                            emit({"event": "srt.voice.progress", "data": {"done": len(items), "total": len(entries), "current": item_id, "attempt": attempt + 1}})
-                            result = self._remote_generate(str(entry["text"]).strip(), voice_id, params, output); break
-                        except Exception as exc: error = str(exc)
-                item = {**entry, "id": item_id, "status": "completed" if result else "failed", "file": str(output) if result else None,
-                        "duration": result["duration"] if result else None, "error": error}
-                items.append(item); emit({"event": "srt.voice.progress", "data": {"done": len(items), "total": len(entries), "item": item}})
+                    pending.append(normalized)
+            if pending:
+                emit({"event": "srt.voice.progress", "data": {"done": len(items), "total": len(entries),
+                                                                  "current": pending[0]["id"], "batch": True}})
+                items.extend(self._remote_generate_batch(pending, voice_id, params, output_dir))
+            items.sort(key=lambda item: int(item.get("id", 0)))
+            for done, item in enumerate(items, 1):
+                emit({"event": "srt.voice.progress", "data": {"done": done, "total": len(entries), "item": item}})
             manifest_path = output_dir / "manifest.json"
             manifest_path.write_text(json.dumps({"voiceId": voice_id, "outputDir": str(output_dir), "items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
             completed = sum(item["status"] == "completed" for item in items)
