@@ -18,6 +18,7 @@ import uuid
 import queue
 import tempfile
 import base64
+import threading
 from urllib.parse import urljoin, urlencode
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -36,6 +37,8 @@ class Worker:
     def __init__(self, user_data: Path):
         self.user_data = user_data
         self.user_data.mkdir(parents=True, exist_ok=True)
+        self.srt_controls: dict[str, dict[str, threading.Event]] = {}
+        self.srt_controls_lock = threading.Lock()
         self.routes: dict[str, Callable[[dict[str, Any]], Any]] = {
             "system.ping": self.ping,
             "system.info": self.system_info,
@@ -61,6 +64,8 @@ class Worker:
             "studio.history.delete": self.studio_history_delete,
             "srt.voice.generate": self.srt_voice_generate,
             "srt.voice.regenerate": self.srt_voice_generate,
+            "srt.voice.control": self.srt_voice_control,
+            "srt.voice.latest": self.srt_voice_latest,
             "capcut.project.validate": self.capcut_project_validate,
             "capcut.project.create": self.capcut_project_create,
             "capcut.open": self.capcut_open,
@@ -374,9 +379,40 @@ class Worker:
             time.sleep(2)
         raise TimeoutError("Dịch vụ TTS quá thời gian chờ 30 phút")
 
+    def _srt_job_path(self, job_id: str) -> Path:
+        folder = self.user_data / "srt-jobs"; folder.mkdir(parents=True, exist_ok=True)
+        return folder / f"{re.sub(r'[^a-zA-Z0-9_-]', '', job_id)}.json"
+
+    def _save_srt_job(self, job: dict[str, Any]) -> None:
+        path = self._srt_job_path(str(job["jobId"])); temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8"); temp.replace(path)
+
+    def srt_voice_latest(self, _params: dict[str, Any]) -> dict[str, Any] | None:
+        folder = self.user_data / "srt-jobs"
+        if not folder.is_dir(): return None
+        paths = sorted(folder.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for path in paths:
+            try: return json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError): continue
+        return None
+
+    def srt_voice_control(self, params: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(params.get("jobId", "")); action = str(params.get("action", ""))
+        with self.srt_controls_lock: control = self.srt_controls.get(job_id)
+        if not control: raise ValueError("Job không còn chạy; hãy dùng Tiếp tục job để chạy phần còn lại")
+        if action == "pause": control["pause"].set(); state = "paused"
+        elif action == "resume": control["pause"].clear(); state = "running"
+        elif action == "cancel": control["cancel"].set(); control["pause"].clear(); state = "cancelled"
+        else: raise ValueError("Lệnh điều khiển job không hợp lệ")
+        emit({"event": "srt.voice.job", "data": {"jobId": job_id, "state": state}})
+        return {"jobId": job_id, "state": state}
+
     def _srt_api_generate(self, engine: str, params: dict[str, Any], entries: list[Any]) -> dict[str, Any]:
         output_dir = Path(str(params.get("outputDir", ""))).resolve(); output_dir.mkdir(parents=True, exist_ok=True)
         workers = min(8, max(1, int(params.get("apiWorkers", 3)))); items = []; pending: list[tuple[dict[str, Any], Path]] = []
+        job_id = str(params.get("jobId") or f"srt-{int(time.time()*1000)}")
+        control = {"pause": threading.Event(), "cancel": threading.Event()}
+        with self.srt_controls_lock: self.srt_controls[job_id] = control
         for position, raw in enumerate(entries, 1):
             if not isinstance(raw, dict) or not str(raw.get("text", "")).strip(): continue
             entry = {**raw, "id": int(raw.get("id", position)), "text": str(raw["text"]).strip()}; output = output_dir / f"{entry['id']:04d}.wav"
@@ -387,25 +423,36 @@ class Worker:
 
         def generate_one(job: tuple[dict[str, Any], Path]) -> dict[str, Any]:
             entry, output = job; last_error = None
+            while control["pause"].is_set() and not control["cancel"].is_set(): time.sleep(.2)
+            if control["cancel"].is_set(): return {**entry, "status": "pending", "error": "Đã huỷ trước khi gửi", "engine": engine}
             for attempt in range(1, 4):
                 emit({"event": "srt.voice.progress", "data": {"event": "attempt", "id": entry["id"], "attempt": attempt}})
                 try: return self._api_generate_one(engine, entry, params, output)
                 except Exception as exc:
                     last_error = exc
-                    if attempt < 3: time.sleep(attempt)
+                    if attempt < 3:
+                        while control["pause"].is_set() and not control["cancel"].is_set(): time.sleep(.2)
+                        if control["cancel"].is_set(): return {**entry, "status": "pending", "error": "Đã huỷ trước khi thử lại", "engine": engine}
+                        time.sleep(attempt)
             return {**entry, "status": "failed", "error": str(last_error), "engine": engine}
 
         total = len(items) + len(pending); done = len(items)
+        job_state = {"jobId": job_id, "state": "running", "engine": engine, "provider": params.get("apiProvider"), "model": params.get("apiModel"), "voiceId": params.get("apiVoiceId"), "workers": workers, "outputDir": str(output_dir), "entries": entries, "items": list(items), "createdAt": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        self._save_srt_job(job_state); emit({"event": "srt.voice.job", "data": {"jobId": job_id, "state": "running"}})
         for item in items: emit({"event": "srt.voice.progress", "data": {"event": "progress", "done": done, "total": total, "item": item, "workers": workers}})
         with ThreadPoolExecutor(max_workers=min(workers, max(1, len(pending)))) as executor:
             futures = [executor.submit(generate_one, job) for job in pending]
             for future in as_completed(futures):
                 item = future.result(); items.append(item); done += 1
+                job_state["items"] = sorted(items, key=lambda x: int(x.get("id", 0))); job_state["state"] = "cancelled" if control["cancel"].is_set() else ("paused" if control["pause"].is_set() else "running"); self._save_srt_job(job_state)
                 emit({"event": "srt.voice.progress", "data": {"event": "progress", "done": done, "total": total, "item": item, "workers": workers}})
         items.sort(key=lambda item: int(item.get("id", 0)))
-        manifest = output_dir / "manifest.json"; manifest.write_text(json.dumps({"engine": engine, "workers": workers, "items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
+        final_state = "cancelled" if control["cancel"].is_set() else "completed"
+        job_state.update({"state": final_state, "items": items, "completedAt": time.strftime("%Y-%m-%dT%H:%M:%S")}); self._save_srt_job(job_state)
+        with self.srt_controls_lock: self.srt_controls.pop(job_id, None)
+        manifest = output_dir / "manifest.json"; manifest.write_text(json.dumps({"jobId": job_id, "state": final_state, "engine": engine, "workers": workers, "items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
         completed = sum(x.get("status") == "completed" for x in items)
-        return {"outputDir": str(output_dir), "manifestPath": str(manifest), "items": items, "completed": completed, "failed": len(items)-completed, "total": len(items)}
+        return {"jobId": job_id, "state": final_state, "outputDir": str(output_dir), "manifestPath": str(manifest), "items": items, "completed": completed, "failed": sum(x.get("status") == "failed" for x in items), "total": len(items)}
 
     def _launch_chrome(self, url: str) -> dict[str, Any]:
         settings = self.settings_get({})["gemini"]
@@ -967,10 +1014,13 @@ def format_srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
 
 
+EMIT_LOCK = threading.Lock()
+
 def emit(message: dict[str, Any]) -> None:
     # ASCII JSON keeps the stdio protocol safe even if pasted text contains a lone UTF-16 surrogate.
-    sys.stdout.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
+    with EMIT_LOCK:
+        sys.stdout.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
 
 
 def sanitize_json_value(value: Any) -> Any:
@@ -1002,12 +1052,13 @@ def main() -> int:
         return self_test()
     worker = Worker(args.user_data)
     emit({"event": "backend.state", "data": {"online": True}})
-    for line in sys.stdin:
-        try:
-            request = json.loads(line)
-            emit(worker.handle(request))
-        except json.JSONDecodeError as exc:
-            emit({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(exc)}})
+    with ThreadPoolExecutor(max_workers=8) as rpc_pool:
+        for line in sys.stdin:
+            try:
+                request = json.loads(line)
+                rpc_pool.submit(lambda value=request: emit(worker.handle(value)))
+            except json.JSONDecodeError as exc:
+                emit({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(exc)}})
     return 0
 
 

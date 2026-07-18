@@ -9,7 +9,7 @@ import './translate-toolbar-v2.css';
 import './srt-voice-v1.css';
 import './capcut-project-v1.css';
 import './voice-backend-settings.css';
-import { AudioLines, Captions, Check, ChevronDown, CircleHelp, Clapperboard, Download, FileText, FolderOpen, Languages, Mic2, MoreHorizontal, Play, RefreshCw, Search, Settings2, Sparkles, Trash2, UploadCloud, Volume2, X } from 'lucide-react';
+import { AudioLines, Captions, Check, ChevronDown, CircleHelp, Clapperboard, Download, FileText, FolderOpen, Languages, Mic2, MoreHorizontal, Pause, Play, RefreshCw, Search, Settings2, Sparkles, Square, Trash2, UploadCloud, Volume2, X } from 'lucide-react';
 
 type Page = 'studio' | 'translate' | 'srt' | 'capcut' | 'settings';
 type Voice = { id: string; name: string; language: string; ready: boolean; source: string };
@@ -271,10 +271,13 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   const [steps, setSteps] = useState(32);
   const [guidance, setGuidance] = useState(2);
   const [audioUrl, setAudioUrl] = useState('');
+  const [activeJobId, setActiveJobId] = useState('');
+  const [jobState, setJobState] = useState<'idle'|'running'|'paused'|'cancelled'|'completed'>('idle');
   useEffect(() => { if (initialDraft) { setDraft(initialDraft); setMessage(`Đã nhận ${initialDraft.rows.length} câu từ tab Dịch.`); } }, [initialDraft]);
   useEffect(() => { if (!voiceId && voices.length) setVoiceId(voices.find((voice) => voice.ready)?.id || ''); }, [voices, voiceId]);
   useEffect(() => window.desktop?.onBackendEvent((raw) => {
-    const packet = raw as { event?: string; data?: { event?: string; done?: number; total?: number; id?: number; attempt?: number; item?: SrtVoiceRow } };
+    const packet = raw as { event?: string; data?: { event?: string; done?: number; total?: number; id?: number; attempt?: number; item?: SrtVoiceRow; jobId?: string; state?: typeof jobState } };
+    if (packet.event === 'srt.voice.job' && packet.data) { if (packet.data.jobId) setActiveJobId(packet.data.jobId); if (packet.data.state) setJobState(packet.data.state); return; }
     if (packet.event !== 'srt.voice.progress' || !packet.data) return;
     const data = packet.data;
     if (data.event === 'model') setMessage('Đang nạp mô hình OmniVoice…');
@@ -287,6 +290,11 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
       setDraft((current) => current ? { ...current, rows: current.rows.map((row) => row.id === data.item!.id ? { ...row, ...data.item } : row) } : current);
     }
   }), []);
+  useEffect(() => { window.desktop?.request<{jobId:string;state:typeof jobState;engine:'ai33'|'aimax';provider:string;model:string;voiceId:string;workers:number;outputDir:string;entries:{id:number;start:string;end:string;text:string}[];items:SrtVoiceRow[]} | null>('srt.voice.latest').then((job)=>{
+    if (!job || (job.state === 'completed' && !job.items.some((x)=>x.status === 'failed'))) return;
+    setActiveJobId(job.jobId); setJobState(job.state === 'running' ? 'cancelled' : job.state); setEngine(job.engine); setApiProvider(job.provider || 'minimax'); setApiModel(job.model || 'speech-2.8-hd'); setApiVoiceId(job.voiceId || ''); setApiWorkers(job.workers || 3); setOutputDir(job.outputDir || '');
+    const byId = new Map(job.items.map((x)=>[x.id,x])); setDraft({name:`Job ${job.jobId}`,path:'',rows:job.entries.map((x)=>({...x,status:'pending',...(byId.get(x.id)||{})}))}); setMessage('Đã khôi phục job gần nhất. Bạn có thể tiếp tục các câu chưa xong hoặc chạy lại câu lỗi.');
+  }).catch(()=>undefined); }, []);
   const chooseSrt = async () => {
     const path = await window.desktop?.selectFile({ filters: [{ name: 'SubRip Subtitle', extensions: ['srt'] }] });
     if (!path || !window.desktop) return;
@@ -322,7 +330,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
       setPreviewUrl(url); setTimeout(() => document.querySelector<HTMLAudioElement>('.api-voice-preview-player')?.play(), 0);
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
-  const run = async (only?: SrtVoiceRow) => {
+  const run = async (only?: SrtVoiceRow, selectedRows?: SrtVoiceRow[]) => {
     if (!window.desktop || !draft || running) return;
     if (engine === 'omnivoice' && !voiceId) return setMessage('Hãy chọn một hồ sơ giọng OmniVoice hoàn chỉnh.');
     if (engine !== 'omnivoice' && !apiVoiceId.trim()) return setMessage('Hãy nhập Voice ID của dịch vụ API.');
@@ -333,23 +341,25 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
       const stem = draft.name.replace(/\.srt$/i, '').replace(/[<>:"/\\|?*]+/g, '-').trim() || 'subtitle';
       destination = `${folder}\\${stem}_voice`; setOutputDir(destination);
     }
-    const entries = only ? [only] : draft.rows.filter((row) => row.text.trim());
+    const entries = selectedRows || (only ? [only] : draft.rows.filter((row) => row.text.trim()));
+    const jobId = `srt-${Date.now()}`; setActiveJobId(jobId); setJobState('running');
     setRunning(true); setProgress({ done: 0, total: entries.length });
     try {
-      const result = await window.desktop.request<{ completed: number; failed: number; total: number; items: SrtVoiceRow[]; outputDir: string }>(only ? 'srt.voice.regenerate' : 'srt.voice.generate', {
+      const result = await window.desktop.request<{ state: 'cancelled'|'completed'; completed: number; failed: number; total: number; items: SrtVoiceRow[]; outputDir: string }>(only ? 'srt.voice.regenerate' : 'srt.voice.generate', {
         entries: entries.map((row) => ({ id: row.id, start: row.start, end: row.end, text: row.text })), voiceId, outputDir: destination,
-        engine, apiProvider, apiModel, apiVoiceId: apiVoiceId.trim(), apiWorkers, language: 'vi', speed, steps, guidance, postprocess: true, denoise: false, skipExisting: !only,
+        jobId, engine, apiProvider, apiModel, apiVoiceId: apiVoiceId.trim(), apiWorkers, language: 'vi', speed, steps, guidance, postprocess: true, denoise: false, skipExisting: !only && !selectedRows,
       });
       setDraft((current) => current ? { ...current, rows: current.rows.map((row) => result.items.find((item) => item.id === row.id) ? { ...row, ...result.items.find((item) => item.id === row.id)! } : row) } : current);
-      setMessage(`Hoàn tất ${result.completed}/${result.total} câu${result.failed ? ` · ${result.failed} câu lỗi` : ''}.`);
+      setJobState(result.state === 'cancelled' ? 'cancelled' : 'completed'); setMessage(`${result.state === 'cancelled' ? 'Đã huỷ' : 'Hoàn tất'} ${result.completed}/${result.total} câu${result.failed ? ` · ${result.failed} câu lỗi` : ''}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setRunning(false); }
   };
+  const controlJob = async (action:'pause'|'resume'|'cancel') => { if(!activeJobId || !window.desktop) return; try { const r=await window.desktop.request<{state:typeof jobState}>('srt.voice.control',{jobId:activeJobId,action}); setJobState(r.state); setMessage(action==='pause'?'Đã tạm dừng gửi câu mới. Các request đang chạy vẫn hoàn tất an toàn.':action==='resume'?'Đang tiếp tục job…':'Đã yêu cầu huỷ job.'); } catch(error){ setMessage(error instanceof Error?error.message:String(error)); } };
   const play = async (row: SrtVoiceRow) => { if (!row.file) return; const url = await window.desktop?.readAudio(row.file); if (url) { setAudioUrl(url); setTimeout(() => document.querySelector<HTMLAudioElement>('.srt-voice-player')?.play(), 0); } };
   const completed = draft?.rows.filter((row) => row.status === 'completed').length || 0;
   const failed = draft?.rows.filter((row) => row.status === 'failed').length || 0;
   return <div className="srt-voice-page">
-    <div className="srt-voice-hero"><div><div className="eyebrow"><Captions size={14} /> OMNIVOICE BATCH</div><h1>Tạo giọng từ <span>phụ đề SRT.</span></h1><p>Tạo từng câu thành 0001.wav, 0002.wav và tự thử lại hai lần khi gặp lỗi.</p></div><div className="srt-voice-actions"><button className="secondary" onClick={chooseSrt}><UploadCloud size={16} /> Chọn file SRT</button><button className="primary" disabled={!draft?.rows.length || running} onClick={() => run()}>{running ? <><RefreshCw className="spin" size={17} /> Đang tạo {progress.done}/{progress.total}</> : <><AudioLines size={17} /> Tạo tất cả</>}</button></div></div>
+    <div className="srt-voice-hero"><div><div className="eyebrow"><Captions size={14} /> VOICE BATCH JOB</div><h1>Tạo giọng từ <span>phụ đề SRT.</span></h1><p>Job tự lưu liên tục, có thể tạm dừng, tiếp tục và chạy lại riêng câu lỗi.</p></div><div className="srt-voice-actions"><button className="secondary" onClick={chooseSrt}><UploadCloud size={16} /> Chọn file SRT</button>{running && engine!=='omnivoice' && <>{jobState==='paused'?<button className="job-resume" onClick={()=>controlJob('resume')}><Play size={16}/> Tiếp tục</button>:<button className="job-pause" onClick={()=>controlJob('pause')}><Pause size={16}/> Tạm dừng</button>}<button className="job-cancel" onClick={()=>controlJob('cancel')}><Square size={15}/> Huỷ</button></>}{!running && failed>0 && <button className="job-retry" onClick={()=>run(undefined,draft!.rows.filter((x)=>x.status==='failed'))}><RefreshCw size={15}/> Chạy lại {failed} lỗi</button>}<button className="primary" disabled={!draft?.rows.length || running} onClick={() => run()}>{running ? <><RefreshCw className="spin" size={17} /> {jobState==='paused'?'Đã tạm dừng':`Đang tạo ${progress.done}/${progress.total}`}</> : <><AudioLines size={17} /> {jobState==='cancelled'?'Tiếp tục phần còn lại':'Tạo tất cả'}</>}</button></div></div>
     <section className="srt-voice-config">
       <label><small>FILE ĐẦU VÀO</small><strong>{draft?.name || 'Chưa chọn SRT'}</strong><span>{draft ? `${draft.rows.length} câu phụ đề` : 'Có thể nhận trực tiếp từ tab Dịch'}</span></label>
       <label><small>MÔ HÌNH TẠO GIỌNG</small><select value={engine} onChange={(e) => setEngine(e.target.value as typeof engine)}><option value="omnivoice">OmniVoice · Local</option><option value="ai33">AI33 API</option><option value="aimax">AIMax API</option></select></label>
