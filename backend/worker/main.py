@@ -17,7 +17,7 @@ import mimetypes
 import uuid
 import queue
 import tempfile
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
@@ -47,6 +47,7 @@ class Worker:
             "settings.tts.get": self.tts_settings_get,
             "settings.tts.save": self.tts_settings_save,
             "settings.tts.test": self.tts_settings_test,
+            "tts.voices.list": self.tts_voices_list,
             "subtitle.parse": self.subtitle_parse,
             "subtitle.save": self.subtitle_save,
             "subtitle.translate": self.subtitle_translate,
@@ -266,6 +267,42 @@ class Worker:
             self._api_json("https://www.aimaxstudio.com/api/v1/voices?limit=1", {"X-API-Key": keys["aimaxKey"]})
         else: raise ValueError("Dịch vụ API không hợp lệ")
         return {"ok": True, "provider": provider}
+
+    @staticmethod
+    def _voice_records(payload: Any) -> list[dict[str, Any]]:
+        """Find the voice list inside provider responses without exposing API-specific JSON to the UI."""
+        if isinstance(payload, list):
+            if all(isinstance(item, dict) for item in payload): return payload
+            return []
+        if not isinstance(payload, dict): return []
+        for key in ("voices", "items", "results", "data", "records"):
+            value = payload.get(key)
+            found = Worker._voice_records(value)
+            if found: return found
+        return []
+
+    def tts_voices_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        engine = str(params.get("engine", "")).lower(); provider = str(params.get("provider", "minimax")).lower()
+        keys = self._tts_api_config()
+        if engine == "ai33":
+            if not keys["ai33Key"]: raise ValueError("Chưa lưu API key AI33 trong Cấu hình")
+            query = urlencode({"provider": provider, "language": "Vietnamese", "page": 1, "page_size": 100})
+            payload = self._api_json(f"https://api.ai33.pro/v3/voices?{query}", {"xi-api-key": keys["ai33Key"]})
+        elif engine == "aimax":
+            if not keys["aimaxKey"]: raise ValueError("Chưa lưu API key AIMax trong Cấu hình")
+            query = urlencode({"provider": provider, "language": "Vietnamese", "limit": 100})
+            payload = self._api_json(f"https://www.aimaxstudio.com/api/v1/voices?{query}", {"X-API-Key": keys["aimaxKey"]})
+        else: raise ValueError("Dịch vụ thư viện giọng không hợp lệ")
+        voices = []
+        for raw in self._voice_records(payload):
+            voice_id = str(raw.get("voice_id") or raw.get("voiceId") or raw.get("id") or raw.get("uuid") or "").strip()
+            if not voice_id: continue
+            name = str(raw.get("name") or raw.get("voice_name") or raw.get("display_name") or raw.get("title") or voice_id)
+            preview = str(raw.get("preview_url") or raw.get("previewUrl") or raw.get("audio_url") or raw.get("sample_url") or raw.get("demo_url") or "")
+            language = raw.get("language") or raw.get("locale") or raw.get("lang") or ""
+            source = raw.get("provider") or raw.get("source") or provider
+            voices.append({"id": voice_id, "name": name, "previewUrl": preview, "language": str(language), "provider": str(source)})
+        return {"engine": engine, "provider": provider, "voices": voices, "total": len(voices)}
 
     def _download_api_audio(self, url: str, destination: Path) -> float:
         with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "HHVietSub/0.1"}), timeout=180) as response: audio = response.read()
