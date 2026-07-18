@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-electron/
+.dev-user-data/
+*.log
+__pycache__/
+*.pyc

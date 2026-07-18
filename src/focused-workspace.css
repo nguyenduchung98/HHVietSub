@@ -1,0 +1,4 @@
+.app-shell.focused-workspace{grid-template-columns:minmax(0,1fr)}
+.focused-workspace .workspace{grid-column:1/-1;padding:30px clamp(36px,7vw,120px)}
+.focused-workspace .translate-page{max-width:1220px;margin:0 auto}
+@media(max-width:1050px){.focused-workspace .workspace{padding:24px}}

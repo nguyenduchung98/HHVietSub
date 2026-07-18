@@ -1,0 +1,1 @@
+.secondary:disabled,.primary:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}.subtitle-empty{height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#9ba5b7;gap:8px}.subtitle-empty strong{font-size:11px;color:#6f7b92}.subtitle-empty small{font-size:9px}.subtitle-row textarea::placeholder{color:#b3bac9}
