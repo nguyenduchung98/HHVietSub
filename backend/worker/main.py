@@ -517,12 +517,35 @@ class Worker:
                 else:
                     pending.append(normalized)
             if pending:
-                emit({"event": "srt.voice.progress", "data": {"done": len(items), "total": len(entries),
-                                                                  "current": pending[0]["id"], "batch": True}})
-                items.extend(self._remote_generate_batch(pending, voice_id, params, output_dir))
+                # Cloudflare quick tunnels return 524 when one HTTP request runs for ~100 seconds.
+                # Five subtitles keeps each inference request safely below that limit on a T4.
+                remote_chunk_size = 5
+                for offset in range(0, len(pending), remote_chunk_size):
+                    chunk = pending[offset:offset + remote_chunk_size]
+                    emit({"event": "srt.voice.progress", "data": {"done": len(items), "total": len(entries),
+                                                                      "current": chunk[0]["id"], "batch": True,
+                                                                      "batchSize": len(chunk)}})
+                    generated = None
+                    last_error = None
+                    for request_attempt in range(1, 4):
+                        try:
+                            generated = self._remote_generate_batch(chunk, voice_id, params, output_dir)
+                            break
+                        except Exception as exc:
+                            last_error = exc
+                            emit({"event": "srt.voice.progress", "data": {"done": len(items), "total": len(entries),
+                                                                              "current": chunk[0]["id"], "batch": True,
+                                                                              "requestAttempt": request_attempt}})
+                            if request_attempt < 3:
+                                time.sleep(2 * request_attempt)
+                    if generated is None:
+                        raise RuntimeError(f"Colab batch {chunk[0]['id']}-{chunk[-1]['id']} thất bại: {last_error}")
+                    completed_before = len(items)
+                    items.extend(generated)
+                    for index, item in enumerate(generated, 1):
+                        emit({"event": "srt.voice.progress", "data": {"done": completed_before + index, "total": len(entries),
+                                                                          "item": item, "batch": True}})
             items.sort(key=lambda item: int(item.get("id", 0)))
-            for done, item in enumerate(items, 1):
-                emit({"event": "srt.voice.progress", "data": {"done": done, "total": len(entries), "item": item}})
             manifest_path = output_dir / "manifest.json"
             manifest_path.write_text(json.dumps({"voiceId": voice_id, "outputDir": str(output_dir), "items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
             completed = sum(item["status"] == "completed" for item in items)
