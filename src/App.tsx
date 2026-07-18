@@ -16,7 +16,7 @@ type Voice = { id: string; name: string; language: string; ready: boolean; sourc
 type StudioResult = { id: string; path: string; name: string; bytes: number; duration: number; generationTime: number; seed: number; format: string; voiceId: string; voiceName: string; language: string; text: string; createdAt: string; srtPath?: string };
 type SrtVoiceRow = { id: number; start: string; end: string; text: string; status: 'pending' | 'generating' | 'completed' | 'failed'; duration?: number; file?: string; error?: string };
 type SrtDraft = { name: string; path: string; rows: SrtVoiceRow[] };
-type ApiVoice = { id: string; name: string; previewUrl?: string; language?: string; provider?: string };
+type ApiVoice = { id: string; name: string; previewUrl?: string; language?: string; provider?: string; personal?: boolean };
 
 const cleanUnicode = (value: string) => new TextDecoder().decode(new TextEncoder().encode(value));
 
@@ -313,7 +313,14 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     finally { setVoiceLibraryLoading(false); }
   };
   const chooseApiVoice = (voice: ApiVoice) => { setApiVoiceId(voice.id); setVoiceLibraryOpen(false); setMessage(`Đã chọn giọng ${voice.name} · ${voice.id}`); };
-  const playApiVoice = (voice: ApiVoice) => { if (!voice.previewUrl) return setMessage('Giọng này không có audio nghe thử.'); setPreviewUrl(voice.previewUrl); setTimeout(() => document.querySelector<HTMLAudioElement>('.api-voice-preview-player')?.play(), 0); };
+  const playApiVoice = async (voice: ApiVoice) => {
+    if (!voice.previewUrl) return setMessage('Giọng này không có audio nghe thử.');
+    try {
+      const url = engine === 'aimax' ? (await window.desktop?.request<{dataUrl:string}>('tts.voice.preview', {engine, url: voice.previewUrl}))?.dataUrl : voice.previewUrl;
+      if (!url) throw new Error('Không tải được audio nghe thử.');
+      setPreviewUrl(url); setTimeout(() => document.querySelector<HTMLAudioElement>('.api-voice-preview-player')?.play(), 0);
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+  };
   const run = async (only?: SrtVoiceRow) => {
     if (!window.desktop || !draft || running) return;
     if (engine === 'omnivoice' && !voiceId) return setMessage('Hãy chọn một hồ sơ giọng OmniVoice hoàn chỉnh.');

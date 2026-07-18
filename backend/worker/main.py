@@ -17,6 +17,7 @@ import mimetypes
 import uuid
 import queue
 import tempfile
+import base64
 from urllib.parse import urljoin, urlencode
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -48,6 +49,7 @@ class Worker:
             "settings.tts.save": self.tts_settings_save,
             "settings.tts.test": self.tts_settings_test,
             "tts.voices.list": self.tts_voices_list,
+            "tts.voice.preview": self.tts_voice_preview,
             "subtitle.parse": self.subtitle_parse,
             "subtitle.save": self.subtitle_save,
             "subtitle.translate": self.subtitle_translate,
@@ -290,22 +292,44 @@ class Worker:
             payload = self._api_json(f"https://api.ai33.pro/v3/voices?{query}", {"xi-api-key": keys["ai33Key"]})
         elif engine == "aimax":
             if not keys["aimaxKey"]: raise ValueError("Chưa lưu API key AIMax trong Cấu hình")
-            query = urlencode({"provider": provider, "language": "Vietnamese", "limit": 100})
-            payload = self._api_json(f"https://www.aimaxstudio.com/api/v1/voices?{query}", {"X-API-Key": keys["aimaxKey"]})
+            headers = {"X-API-Key": keys["aimaxKey"]}; records = []
+            for page in range(10):
+                payload_page = self._api_json(f"https://www.aimaxstudio.com/api/v1/voices?{urlencode({'page': page, 'limit': 100})}", headers)
+                records.extend(self._voice_records(payload_page))
+                if not bool(payload_page.get("has_more")): break
+            personal = self._api_json("https://www.aimaxstudio.com/api/v1/voices/my", headers)
+            records.extend(self._voice_records(personal)); payload = records
         else: raise ValueError("Dịch vụ thư viện giọng không hợp lệ")
-        voices = []
+        voices = []; seen_voice_ids: set[str] = set()
         for raw in self._voice_records(payload):
             voice_id = str(raw.get("voice_id") or raw.get("voiceId") or raw.get("id") or raw.get("uuid") or "").strip()
-            if not voice_id: continue
+            if not voice_id or voice_id in seen_voice_ids: continue
             name = str(raw.get("name") or raw.get("voice_name") or raw.get("display_name") or raw.get("title") or voice_id)
-            preview = str(raw.get("preview_url") or raw.get("previewUrl") or raw.get("audio_url") or raw.get("sample_url") or raw.get("demo_url") or "")
+            preview = str(raw.get("preview_url") or raw.get("previewUrl") or raw.get("generated_audio_cdn_url") or raw.get("audio_url") or raw.get("sample_url") or raw.get("demo_url") or "")
             language = raw.get("language") or raw.get("locale") or raw.get("lang") or ""
             source = raw.get("provider") or raw.get("source") or provider
-            voices.append({"id": voice_id, "name": name, "previewUrl": preview, "language": str(language), "provider": str(source)})
+            if engine == "aimax" and provider and str(source).lower() not in {provider, "", "none"} and not voice_id.startswith("uv_"): continue
+            voices.append({"id": voice_id, "name": name, "previewUrl": preview, "language": str(language), "provider": str(source), "personal": voice_id.startswith("uv_")}); seen_voice_ids.add(voice_id)
         return {"engine": engine, "provider": provider, "voices": voices, "total": len(voices)}
 
-    def _download_api_audio(self, url: str, destination: Path) -> float:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "HHVietSub/0.1"}), timeout=180) as response: audio = response.read()
+    def tts_voice_preview(self, params: dict[str, Any]) -> dict[str, str]:
+        engine = str(params.get("engine", "")); url = str(params.get("url", "")).strip()
+        if engine != "aimax" or not url: raise ValueError("Audio nghe thử không hợp lệ")
+        key = self._tts_api_config()["aimaxKey"]
+        if not key: raise ValueError("Chưa lưu API key AIMax trong Cấu hình")
+        full_url = urljoin("https://www.aimaxstudio.com", url)
+        if not full_url.startswith("https://"): raise ValueError("URL audio nghe thử phải dùng HTTPS")
+        preview_headers = {"User-Agent": "HHVietSub/0.1"}
+        if full_url.startswith("https://www.aimaxstudio.com/"): preview_headers["X-API-Key"] = key
+        request = urllib.request.Request(full_url, headers=preview_headers)
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                audio = response.read(); mime = response.headers.get_content_type() or "audio/mpeg"
+        except urllib.error.HTTPError as exc: raise RuntimeError(f"Không tải được audio nghe thử ({exc.code})") from exc
+        return {"dataUrl": f"data:{mime};base64,{base64.b64encode(audio).decode('ascii')}"}
+
+    def _download_api_audio(self, url: str, destination: Path, headers: dict[str, str] | None = None) -> float:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "HHVietSub/0.1", **(headers or {})}), timeout=180) as response: audio = response.read()
         destination.parent.mkdir(parents=True, exist_ok=True)
         if audio[:4] == b"RIFF": destination.write_bytes(audio)
         else:
@@ -331,7 +355,10 @@ class Worker:
             job_id = created.get("task_id"); poll_url = f"https://api.ai33.pro/v1/task/{job_id}"; headers = {"xi-api-key": keys["ai33Key"]}; base = "https://api.ai33.pro"
         else:
             if not keys["aimaxKey"]: raise ValueError("Chưa lưu API key AIMax trong Cấu hình")
-            created = self._api_json("https://www.aimaxstudio.com/api/v1/tts/generate", {"X-API-Key": keys["aimaxKey"]}, "POST", {"provider": provider, "voice_id": voice_id, "text": entry["text"], "speed": speed, "model": model, "language": "Vietnamese", "normalize": True, "enable_srt": False})
+            safe_speed = min(1.2, max(.7, speed)) if provider == "elevenlabs" else min(2.0, max(.5, speed))
+            fields = {"provider": provider, "voice_id": voice_id, "text": entry["text"], "speed": safe_speed, "pitch": 0, "vol": 1.0, "model": model, "language": "Vietnamese", "normalize": True, "enable_srt": False}
+            if provider == "elevenlabs": fields.update({"stability": .5, "similarity": .75, "style_exaggeration": .3, "use_speaker_boost": True})
+            created = self._api_json("https://www.aimaxstudio.com/api/v1/tts/generate", {"X-API-Key": keys["aimaxKey"]}, "POST", fields)
             job_id = created.get("job_id"); poll_url = f"https://www.aimaxstudio.com/api/v1/tts/jobs/{job_id}"; headers = {"X-API-Key": keys["aimaxKey"]}; base = "https://www.aimaxstudio.com"
         if not job_id: raise RuntimeError("Dịch vụ không trả về mã tác vụ")
         deadline = time.time() + 1800
@@ -341,7 +368,7 @@ class Worker:
                 metadata = status.get("metadata") if isinstance(status.get("metadata"), dict) else {}
                 audio_url = status.get("audio_url") or status.get("output_uri") or metadata.get("audio_url") or metadata.get("output_uri")
                 if not audio_url: raise RuntimeError("Tác vụ hoàn tất nhưng không có URL audio")
-                duration = self._download_api_audio(urljoin(base, str(audio_url)), output)
+                duration = self._download_api_audio(urljoin(base, str(audio_url)), output, headers)
                 return {**entry, "status": "completed", "file": str(output), "duration": round(duration, 2), "engine": engine}
             if state in {"failed", "error", "cancelled", "canceled"}: raise RuntimeError(str(status.get("error_message") or status.get("message") or "Tác vụ TTS thất bại"))
             time.sleep(2)
