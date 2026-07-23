@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('desktop', {
   request: (method: string, params: unknown = {}) => ipcRenderer.invoke('backend:request', method, params),
   selectFile: (options: unknown = {}) => ipcRenderer.invoke('dialog:file', options),
   selectFolder: () => ipcRenderer.invoke('dialog:folder'),
+  readText: (filePath: string) => ipcRenderer.invoke('file:text-data', filePath),
   readAudio: (filePath: string) => ipcRenderer.invoke('file:audio-data', filePath),
   saveAudio: (filePath: string) => ipcRenderer.invoke('file:save-audio', filePath),
   showInFolder: (filePath: string) => ipcRenderer.invoke('file:show-in-folder', filePath),

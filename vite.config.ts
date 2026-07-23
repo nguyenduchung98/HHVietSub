@@ -19,6 +19,7 @@ const utf8Headers = () => ({
 });
 
 export default defineConfig({
+  base: './',
   plugins: [utf8Headers(), react()],
   server: { port: 5173, strictPort: true },
 });

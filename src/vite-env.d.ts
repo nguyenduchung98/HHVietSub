@@ -5,6 +5,7 @@ interface Window {
     request: <T = unknown>(method: string, params?: unknown) => Promise<T>;
     selectFile: (options?: unknown) => Promise<string | null>;
     selectFolder: () => Promise<string | null>;
+    readText: (filePath: string) => Promise<string>;
     readAudio: (filePath: string) => Promise<string>;
     saveAudio: (filePath: string) => Promise<string | null>;
     showInFolder: (filePath: string) => Promise<void>;

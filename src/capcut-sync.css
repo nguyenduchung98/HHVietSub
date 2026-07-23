@@ -1,0 +1,8 @@
+.capcut-mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;padding:5px;border:1px solid #e1e5f1;border-radius:16px;background:#eef1f8}
+.capcut-mode-switch button{border:0;border-radius:12px;background:transparent;padding:12px 15px;display:flex;align-items:center;gap:11px;text-align:left;color:#78839a;cursor:pointer}
+.capcut-mode-switch button span{display:grid;gap:3px}.capcut-mode-switch strong{font-size:11px}.capcut-mode-switch small{font-size:8px}
+.capcut-mode-switch button.selected{background:#fff;color:#6f57e9;box-shadow:0 5px 15px rgba(48,57,91,.09)}
+.capcut-project-picker{position:relative;border:1px solid #dfe4f1;border-radius:17px;background:#fff;padding:18px;display:flex;align-items:center;gap:14px;color:#6d57e8;min-width:0;box-shadow:0 8px 24px rgba(45,55,95,.035)}
+.capcut-project-picker>div{display:grid;gap:4px;min-width:0;width:100%}.capcut-project-picker select{border:0;background:#f7f8fc;border-radius:8px;height:30px;padding:0 8px;color:#303a55;font-size:11px;font-weight:700;outline:0;min-width:0}
+.capcut-project-picker em{font-style:normal;font-size:8px;color:#9aa2b5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.capcut-project-settings.existing{grid-template-columns:1fr}.capcut-project-settings.existing .capcut-readiness{min-height:46px}
+@media(max-width:1000px){.capcut-mode-switch{grid-template-columns:1fr}}

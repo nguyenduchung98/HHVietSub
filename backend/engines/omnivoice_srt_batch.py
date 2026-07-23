@@ -8,7 +8,8 @@ from pathlib import Path
 
 
 def send(payload: dict) -> None:
-    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    # Keep progress events safe on Windows consoles that still default to cp1252.
+    print(json.dumps(payload, ensure_ascii=True), flush=True)
 
 
 def main() -> int:
@@ -20,6 +21,7 @@ def main() -> int:
     output_dir = Path(job["outputDir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    send({"event": "startup", "status": "importing", "message": "Đang khởi động PyTorch…"})
     import soundfile as sf
     import torch
     from omnivoice.models.omnivoice import OmniVoice, VoiceClonePrompt
@@ -28,14 +30,51 @@ def main() -> int:
     text_path = voice_dir / str(profile.get("ref_text_file", "ref_text.txt"))
     ref_text = text_path.read_text(encoding="utf-8").strip() if text_path.exists() else None
     prompt_path = voice_dir / str(profile.get("voice_prompt", "voice.pt"))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
-    send({"event": "model", "status": "loading", "device": device})
-    model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device_map=device, dtype=dtype, load_asr=not bool(ref_text))
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if device.startswith("cuda") else torch.float32
+    send({"event": "model", "status": "loading", "device": device, "message": f"Đang nạp OmniVoice trên {device.upper()}…"})
+    model_path = Path(str(job.get("modelPath", ""))).resolve()
+    if not (model_path / "config.json").is_file():
+        raise RuntimeError(f"OmniVoice snapshot không hợp lệ: {model_path}")
+    send({"event": "model", "status": "loading", "device": device,
+          "message": f"Đang nạp OmniVoice local từ {model_path.name} trên {device.upper()}…"})
+    model = OmniVoice.from_pretrained(
+        str(model_path), device_map=device, dtype=dtype,
+        load_asr=not bool(ref_text), local_files_only=True,
+    )
     prompt = None
     if prompt_path.exists():
-        data = torch.load(prompt_path, map_location="cpu", weights_only=True)
-        prompt = VoiceClonePrompt(ref_audio_tokens=data["ref_audio_tokens"], ref_text=data["ref_text"], ref_rms=data["ref_rms"])
+        # OmniVoice >= 0.2.1 provides the canonical cross-session loader.
+        # Keep compatibility with the Vietnamese profiles created by speak.py
+        # on OmniVoice 0.1.x, which store the same fields as a plain dict.
+        if hasattr(VoiceClonePrompt, "load"):
+            prompt = VoiceClonePrompt.load(prompt_path)
+        else:
+            data = torch.load(prompt_path, map_location="cpu", weights_only=True)
+            prompt = VoiceClonePrompt(
+                ref_audio_tokens=data["ref_audio_tokens"],
+                ref_text=data["ref_text"],
+                ref_rms=data["ref_rms"],
+            )
+    else:
+        send({"event": "prompt", "status": "building", "message": "Đang tạo voice.pt từ audio tham chiếu…"})
+        prompt = model.create_voice_clone_prompt(
+            ref_audio=str(voice_dir / str(profile["ref_audio"])),
+            ref_text=ref_text,
+            preprocess_prompt=bool(profile.get("preprocess_prompt", False)),
+        )
+        temporary_prompt = prompt_path.with_suffix(".pt.tmp")
+        if hasattr(prompt, "save"):
+            prompt.save(temporary_prompt)
+        else:
+            torch.save({
+                "ref_audio_tokens": prompt.ref_audio_tokens.cpu(),
+                "ref_text": prompt.ref_text,
+                "ref_rms": prompt.ref_rms,
+            }, temporary_prompt)
+        temporary_prompt.replace(prompt_path)
+        send({"event": "prompt", "status": "ready", "message": "Đã tạo voice.pt; bắt đầu tạo phụ đề…"})
+    send({"event": "model", "status": "ready", "device": device, "message": "Model đã sẵn sàng; bắt đầu tạo câu 0001…"})
 
     entries = job["entries"]
     completed = []
@@ -66,11 +105,9 @@ def main() -> int:
                     guidance_scale=float(job.get("guidance", 2.0)), denoise=bool(job.get("denoise", False)),
                     postprocess_output=bool(job.get("postprocess", True)),
                 )
-                if prompt is not None:
-                    generate_args["voice_clone_prompt"] = prompt
-                else:
-                    generate_args.update(ref_audio=str(voice_dir / str(profile["ref_audio"])), ref_text=ref_text)
-                audio = model.generate(**generate_args)[0]
+                generate_args["voice_clone_prompt"] = prompt
+                with torch.inference_mode():
+                    audio = model.generate(**generate_args)[0]
                 temporary = output_path.with_suffix(".wav.tmp")
                 sf.write(str(temporary), audio, model.sampling_rate, format="WAV")
                 info = sf.info(str(temporary))
@@ -94,4 +131,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        send({"event": "error", "message": f"{type(exc).__name__}: {exc}"})
+        raise

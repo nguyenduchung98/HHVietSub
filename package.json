@@ -1,18 +1,81 @@
 {
   "name": "dich-capcut-studio",
-  "version": "0.1.0-dev",
+  "version": "0.1.0",
+  "packageManager": "npm@10.0.0",
+  "description": "HHVietSub AI Subtitle & Voice Studio",
+  "author": "HHVietSub Team",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"wait-on tcp:5173 file:dist-electron/main.js && electron .\"",
     "dev:web": "vite",
+    "build": "tsc -p electron/tsconfig.json && vite build",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build:web": "vite build",
+    "package:win": "npm run build && electron-builder --win nsis portable",
+    "package:dir": "npm run build && electron-builder --win dir",
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "backend:check": "node scripts/backend-check.mjs",
+    "test:backend": "node scripts/backend-test.mjs",
     "test": "node scripts/test.mjs"
+  },
+  "build": {
+    "appId": "com.hhvietsub.studio",
+    "productName": "HHVietSub Studio",
+    "directories": {
+      "output": "dist-package"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!tests/**/*",
+          "!**/__pycache__/**/*",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "vendor",
+        "to": "vendor",
+        "filter": [
+          "capcut-cli/dist/**/*",
+          "capcut-cli/templates/**/*",
+          "capcut-cli/package.json",
+          "capcut-cli/LICENSE",
+          "ffprobe.exe"
+        ]
+      },
+      {
+        "from": "setup_ffmpeg.bat",
+        "to": "setup_ffmpeg.bat"
+      },
+      {
+        "from": "setup_vieneu_backend.bat",
+        "to": "setup_vieneu_backend.bat"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "asar": true,
+    "npmRebuild": false,
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "electron": "latest",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
@@ -24,6 +87,8 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "concurrently": "latest",
+    "electron": "latest",
+    "electron-builder": "latest",
     "typescript": "latest",
     "wait-on": "latest"
   }

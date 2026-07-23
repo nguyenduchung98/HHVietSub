@@ -45,7 +45,8 @@ def main() -> int:
             ref_audio_tokens=data["ref_audio_tokens"], ref_text=data["ref_text"], ref_rms=data["ref_rms"])
     else:
         generate_args.update(ref_audio=str(audio_path), ref_text=ref_text)
-    audio = model.generate(**generate_args)[0]
+    with torch.inference_mode():
+        audio = model.generate(**generate_args)[0]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(args.output, audio, model.sampling_rate)
     print(json.dumps({"output": str(args.output), "sample_rate": model.sampling_rate}, ensure_ascii=False))

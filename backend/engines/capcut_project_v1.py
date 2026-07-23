@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import csv
 import ctypes
+import os
 import re
 import shutil
 import subprocess
@@ -14,7 +15,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-LEGACY_ROOT = Path(r"D:\Dịch-Đồng Bộ\Dich_CapCut_v2")
+LEGACY_ROOT = Path(os.environ.get(
+    "HHVIETSUB_CAPCUT_BRIDGE_ROOT",
+    r"D:\Dịch-Đồng Bộ\Dich_CapCut_v2",
+)).expanduser().resolve()
+if not LEGACY_ROOT.is_dir():
+    raise RuntimeError(
+        "Không tìm thấy CapCut bridge. Hãy đặt biến HHVIETSUB_CAPCUT_BRIDGE_ROOT "
+        "hoặc cấu hình thư mục tích hợp CapCut."
+    )
 sys.path.insert(0, str(LEGACY_ROOT))
 from core.draft_engine import (  # noqa: E402
     _apply_srt_to_existing_text_track,
@@ -39,7 +48,8 @@ def project_root() -> Path:
 
 
 def _plain(value: str) -> str:
-    return unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").lower()
+    cleaned = value.replace("Đ", "D").replace("đ", "d")
+    return unicodedata.normalize("NFKD", cleaned).encode("ascii", "ignore").decode("ascii").lower()
 
 
 def _draft_score(folder: Path) -> tuple[int, float] | None:
@@ -259,6 +269,68 @@ def validate_inputs(video: Path, srt: Path, voice_dir: Path) -> dict[str, Any]:
         match = next((item for item in matches if item.is_file()), None)
         (found if match else missing).append(str(match) if match else index)
     return {"subtitles": len(cues), "voiceFiles": len(found), "missing": missing, "ready": not missing}
+
+
+def validate_existing_inputs(project: Path, srt: Path, voice_dir: Path) -> dict[str, Any]:
+    if not project.is_dir() or not (project / "draft_content.json").is_file():
+        raise ValueError("Dự án CapCut đã chọn không hợp lệ")
+    # Reuse the proven SRT ↔ numbered voice validation without requiring a video file.
+    if not srt.is_file() or srt.suffix.lower() != ".srt":
+        raise ValueError("File SRT không hợp lệ")
+    if not voice_dir.is_dir():
+        raise ValueError("Thư mục voice không tồn tại")
+    cues = _collect_srt_segments(srt)
+    missing = []
+    found = []
+    for index in range(1, len(cues) + 1):
+        candidates = [voice_dir / f"{index:04d}{ext}" for ext in (".wav", ".mp3", ".flac", ".m4a", ".ogg")]
+        candidates += [voice_dir / f"{index}{ext}" for ext in (".wav", ".mp3", ".flac", ".m4a", ".ogg")]
+        match = next((item for item in candidates if item.is_file()), None)
+        (found if match else missing).append(str(match) if match else index)
+    return {"subtitles": len(cues), "voiceFiles": len(found), "missing": missing, "ready": not missing,
+            "projectName": project.name, "projectPath": str(project)}
+
+
+def sync_existing_project(project: Path, srt: Path, voice_dir: Path,
+                          logger: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """Add SRT voices to an existing draft, preserving a recoverable JSON snapshot."""
+    log = logger or (lambda _message: None)
+    ensure_capcut_closed(log)
+    analysis = validate_existing_inputs(project, srt, voice_dir)
+    if analysis["missing"]:
+        preview = ", ".join(f"{value:04d}" for value in analysis["missing"][:12])
+        raise RuntimeError(f"Thiếu {len(analysis['missing'])} file voice: {preview}")
+    draft_path, mirrors = resolve_project_draft_paths(project)
+    # Keep a timestamped snapshot inside the project. Only JSON metadata is copied;
+    # source videos/audio remain untouched and are referenced by path.
+    backup_dir = project / f"HHVietSub_Backup_{time.strftime('%Y%m%d_%H%M%S')}"
+    backup_dir.mkdir(parents=False, exist_ok=False)
+    for source in {draft_path, *mirrors, project / "draft_meta_info.json"}:
+        if source.is_file():
+            shutil.copy2(source, backup_dir / source.name)
+    log(f"Đã sao lưu draft: {backup_dir.name}")
+    try:
+        data = load_draft_json(draft_path, require_tracks=True)
+        srt_segments = _collect_srt_segments(srt)
+        _apply_srt_to_existing_text_track(data, srt_segments, log)
+        save_project_drafts(draft_path, mirrors, data)
+        log(f"Đã cập nhật {len(srt_segments)} dòng phụ đề trên dự án có sẵn")
+        import_result = import_voice_files_by_subtitles(project, voice_dir, srt_path=srt, backup=False, logger=log)
+        cut_result = cut_video_by_subtitles_only(project, backup=False, logger=log, srt_path=srt)
+        sync_result = retime_video_subtitle_segments_to_audio(project, backup=False, logger=log,
+                                                               use_audio_timing=True, srt_path=srt)
+        normalize_project_metadata(project, log)
+        final_draft, _ = resolve_project_draft_paths(project)
+        final_data = load_draft_json(final_draft, require_tracks=True)
+        final_duration = int(final_data.get("duration", 0))
+        _finalize_native_metadata(project, final_duration)
+        _patch_root_registration(project_root(), project, duration=final_duration)
+        return {"projectName": project.name, "projectPath": str(project), "template": "Dự án có sẵn",
+                "backupPath": str(backup_dir), "analysis": analysis, "import": import_result,
+                "cut": cut_result, "sync": sync_result}
+    except Exception:
+        log(f"Đồng bộ lỗi; bản sao an toàn nằm tại {backup_dir}")
+        raise
 
 
 def _patch_root_registration(root: Path, target: Path, remove: bool = False, duration: int = 0) -> None:

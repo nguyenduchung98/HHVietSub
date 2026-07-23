@@ -1,7 +1,13 @@
 node_modules/
 dist/
 dist-electron/
+dist-build/
+dist-package*/
+dist-release/
 .dev-user-data/
+runtime/
 *.log
 __pycache__/
 *.pyc
+.pytest_cache/
+*.tmp

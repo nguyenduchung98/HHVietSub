@@ -3,7 +3,20 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import readline from 'node:readline';
 
-type RpcMessage = { id?: string; result?: unknown; error?: { message: string }; event?: string; data?: unknown };
+import fs from 'node:fs';
+
+type RpcMessage = { id?: string; result?: unknown; error?: { code?: number; message: string; data?: { kind?: string } }; event?: string; data?: unknown };
+
+export class BackendRpcError extends Error {
+  constructor(message: string, readonly code = -32000, readonly kind = 'internal_error') {
+    super(message);
+    this.name = 'BackendRpcError';
+  }
+}
+
+const appRoot = () => process.resourcesPath && fs.existsSync(path.join(process.resourcesPath, 'backend'))
+  ? process.resourcesPath
+  : path.resolve(__dirname, '..');
 
 export class BackendManager {
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -21,12 +34,35 @@ export class BackendManager {
     try { await this.starting; } finally { this.starting = null; }
   }
 
+  private findPython(): string {
+    if (process.env.DCC_PYTHON && fs.existsSync(process.env.DCC_PYTHON)) return process.env.DCC_PYTHON;
+
+    const candidates = [
+      path.join(process.resourcesPath, 'runtime', 'python', 'python.exe'),
+      path.join(process.resourcesPath, 'python', 'python.exe'),
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python312', 'python.exe') : '',
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python313', 'python.exe') : '',
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python314', 'python.exe') : '',
+    ].filter(Boolean);
+    const installed = candidates.find((candidate) => fs.existsSync(candidate));
+    if (installed) return installed;
+
+    return 'python.exe';
+  }
+
   private async spawnBackend() {
-    const python = process.env.DCC_PYTHON ?? 'C:\\Users\\Admin\\AppData\\Roaming\\uv\\python\\cpython-3.12.13-windows-x86_64-none\\python.exe';
-    const worker = path.resolve(__dirname, '..', 'backend', 'worker', 'main.py');
+    const python = this.findPython();
+    const workerInResources = process.resourcesPath ? path.join(process.resourcesPath, 'backend', 'worker', 'main.py') : '';
+    const workerInDev = path.resolve(__dirname, '..', 'backend', 'worker', 'main.py');
+    const worker = workerInResources && fs.existsSync(workerInResources) ? workerInResources : workerInDev;
     this.process = spawn(python, [worker, '--user-data', this.userData], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+        HHVIETSUB_APP_ROOT: appRoot(),
+      },
     });
     readline.createInterface({ input: this.process.stdout }).on('line', (line) => this.handleLine(line));
     this.process.stderr.on('data', (data) => this.events.emit('event', { event: 'backend.log', data: String(data) }));
@@ -44,7 +80,7 @@ export class BackendManager {
     if (!this.process || !this.process.stdin.writable) throw new Error('Backend chưa sẵn sàng');
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {
-      const timeoutMs = method === 'studio.generate' || method === 'subtitle.translate.browser' || method.startsWith('srt.voice.') || method === 'capcut.project.create' ? 30 * 60_000 : 30_000;
+      const timeoutMs = method === 'studio.generate' || method === 'voice.create' || method === 'subtitle.translate.browser' || method.startsWith('srt.voice.') || method === 'capcut.project.create' || method === 'capcut.project.sync' ? 30 * 60_000 : 30_000;
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Backend không phản hồi đúng thời hạn (${method}).`));
@@ -78,7 +114,9 @@ export class BackendManager {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
-      message.error ? pending.reject(new Error(message.error.message)) : pending.resolve(message.result);
+      message.error
+        ? pending.reject(new BackendRpcError(message.error.message, message.error.code, message.error.data?.kind))
+        : pending.resolve(message.result);
     } catch (error) {
       this.events.emit('event', { event: 'backend.log', data: `Protocol error: ${String(error)}` });
     }
