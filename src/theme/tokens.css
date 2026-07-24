@@ -1,0 +1,60 @@
+:root {
+  color-scheme: light;
+
+  --font-sans: "Be Vietnam Pro", Inter, "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-muted: #f1f3f8;
+  --border: #e3e7ef;
+  --text: #172033;
+  --text-muted: #69758d;
+
+  --accent: #7c5cfc;
+  --accent-2: #9d7bff;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 5%);
+  --shadow-md: 0 8px 24px rgb(15 23 42 / 8%);
+  --shadow-lg: 0 18px 48px rgb(15 23 42 / 12%);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #10131c;
+  --surface: #171b26;
+  --surface-muted: #202634;
+  --border: #303849;
+  --text: #f3f5fb;
+  --text-muted: #a5afc2;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 28%);
+  --shadow-lg: 0 18px 48px rgb(0 0 0 / 36%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #10131c;
+    --surface: #171b26;
+    --surface-muted: #202634;
+    --border: #303849;
+    --text: #f3f5fb;
+    --text-muted: #a5afc2;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+    --shadow-md: 0 8px 24px rgb(0 0 0 / 28%);
+    --shadow-lg: 0 18px 48px rgb(0 0 0 / 36%);
+  }
+}
