@@ -10,7 +10,8 @@ import './srt-voice-v1.css';
 import './capcut-project-v1.css';
 import './capcut-sync.css';
 import './voice-backend-settings.css';
-import { AudioLines, Captions, Check, ChevronDown, CircleHelp, Clapperboard, Download, DownloadCloud, FileText, FolderOpen, Languages, Loader2, Mic2, MoreHorizontal, Pause, Play, RefreshCw, Search, Settings2, Sliders, Sparkles, Square, Trash2, UploadCloud, Volume2, X, Zap } from 'lucide-react';
+import './shell-v3.css';
+import { AudioLines, Captions, Check, ChevronDown, CircleHelp, Clapperboard, Download, DownloadCloud, FileText, FolderOpen, Languages, Loader2, Mic2, Moon, MoreHorizontal, Pause, Play, RefreshCw, Search, Settings2, Sliders, Sparkles, Square, Sun, Trash2, UploadCloud, Volume2, X, Zap } from 'lucide-react';
 
 type Page = 'studio' | 'translate' | 'srt' | 'capcut' | 'settings';
 type Voice = { id: string; name: string; language: string; ready: boolean; source: string };
@@ -37,6 +38,12 @@ const sampleVoices: Voice[] = [
 export function App() {
   const [page, setPage] = useState<Page>('srt');
   const [online, setOnline] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('hhvietsub.theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
+  const [uiLanguage, setUiLanguage] = useState('vi');
   const [voices] = useState<Voice[]>([]);
   const [query, setQuery] = useState('');
   const [selectedVoice, setSelectedVoice] = useState('ban-mai');
@@ -56,13 +63,22 @@ export function App() {
     });
   }, []);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('hhvietsub.theme', theme);
+  }, [theme]);
+
   const filteredVoices = useMemo(() => voices.filter((voice) => voice.name.toLowerCase().includes(query.toLowerCase())), [voices, query]);
   const focusedWorkspace = true;
   return <div className="app-shell focused-workspace lite-shell">
     <header className="topbar">
-      <div className="brand"><div className="brand-mark"><AudioLines size={23} /></div><div><strong>HHVietSub Lite</strong><span>CAPCUT VOICE & SYNC</span></div></div>
+      <div className="brand"><div className="brand-mark"><AudioLines size={23} /></div><div><strong>HHVietSub Lite</strong><span>CapCut Voice & Sync</span></div></div>
       <nav className="nav-pills">{nav.map((item) => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => setPage(item.id)}><item.icon size={15} />{item.label}</button>)}</nav>
-      <div className="top-actions"><span className={`backend-state ${online ? 'online' : ''}`}><i />{online ? 'Backend sẵn sàng' : 'Backend chưa sẵn sàng'}</span><div className="avatar">LT</div></div>
+      <div className="top-actions">
+        <span className={`backend-state ${online ? 'online' : ''}`}><i />{online ? 'Backend sẵn sàng' : 'Backend chưa sẵn sàng'}</span>
+        <label className="ui-language-picker" title="Ngôn ngữ giao diện"><Languages size={16}/><select aria-label="Ngôn ngữ giao diện" value={uiLanguage} onChange={(event) => setUiLanguage(event.target.value)}><option value="vi">VI</option></select></label>
+        <button className="theme-toggle" type="button" title={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'} aria-label={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'} onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</button>
+      </div>
     </header>
 
     {false && <aside className="sidebar">
@@ -74,10 +90,10 @@ export function App() {
     </aside>}
 
     <main className="workspace">
-      <div style={{ display: page === 'srt' ? 'block' : 'none' }}>
+      <div className="workspace-view" style={{ display: page === 'srt' ? 'block' : 'none' }}>
         <SrtVoicePage voices={voices} initialDraft={srtDraft} />
       </div>
-      <div style={{ display: page === 'capcut' ? 'block' : 'none' }}>
+      <div className="workspace-view" style={{ display: page === 'capcut' ? 'block' : 'none' }}>
         <CapCutProjectPage />
       </div>
     </main>

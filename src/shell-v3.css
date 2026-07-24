@@ -1,0 +1,136 @@
+.lite-shell {
+  min-height: 100vh;
+  height: 100vh;
+  grid-template-rows: 72px minmax(0, 1fr);
+  color: var(--text);
+  background: var(--bg) !important;
+}
+
+.lite-shell .topbar {
+  height: 72px;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+  padding: 0 var(--space-6);
+  border-color: var(--border);
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+
+.lite-shell .brand strong { color: var(--text); }
+.lite-shell .brand span { color: var(--text-muted); text-transform: none; }
+.lite-shell .nav-pills { border-color: var(--border); background: var(--surface-muted); }
+.lite-shell .nav-pills button { min-width: 150px; color: var(--text-muted); }
+.lite-shell .nav-pills button.active { color: var(--accent); background: var(--surface); }
+.lite-shell .top-actions { justify-self: end; }
+
+.lite-shell .backend-state {
+  display: flex !important;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border-color: var(--border);
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ui-language-picker,
+.theme-toggle {
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.ui-language-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+}
+
+.ui-language-picker select {
+  width: 34px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.theme-toggle { width: 36px; display: grid; place-items: center; }
+.theme-toggle:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); }
+.theme-toggle:focus-visible, .ui-language-picker:focus-within {
+  outline: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  outline-offset: 2px;
+}
+
+.focused-workspace .workspace {
+  min-height: 0;
+  padding: var(--space-6) clamp(24px, 4vw, 64px);
+  background: var(--bg);
+}
+
+.workspace-view { min-height: 100%; }
+
+/* Phase 3 establishes the shell; detailed form grouping follows in Phase 4. */
+.workspace-view > .srt-voice-page {
+  max-width: 1480px;
+  display: grid;
+  grid-template-columns: minmax(340px, 420px) minmax(560px, 1fr);
+  align-items: start;
+  gap: var(--space-4) var(--space-6);
+}
+
+.srt-voice-page > .srt-voice-hero { grid-column: 1 / -1; }
+.srt-voice-page > .lite-engine-switch,
+.srt-voice-page > .srt-voice-config { grid-column: 1; }
+.srt-voice-page > .srt-queue-panel,
+.srt-voice-page > .srt-run-stats,
+.srt-voice-page > .srt-voice-table,
+.srt-voice-page > .srt-voice-footer { grid-column: 2; }
+
+.srt-voice-page > .lite-engine-switch,
+.srt-voice-page > .srt-voice-config {
+  margin: 0;
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.srt-voice-page > .srt-voice-config {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-self: start;
+}
+
+.srt-voice-page > .srt-run-stats,
+.srt-voice-page > .srt-voice-table,
+.srt-voice-page > .srt-voice-footer { margin-top: 0; }
+.srt-voice-page > .srt-voice-table { min-width: 0; }
+.srt-voice-page > .srt-voice-footer { font-size: 13px; }
+
+:root[data-theme="dark"] .lite-shell .topbar,
+:root[data-theme="dark"] .srt-voice-page > .lite-engine-switch,
+:root[data-theme="dark"] .srt-voice-page > .srt-voice-config {
+  color: var(--text);
+  background: var(--surface);
+}
+
+@media (max-width: 1180px) {
+  .lite-shell .topbar { grid-template-columns: 210px 1fr auto; padding: 0 var(--space-4); }
+  .lite-shell .nav-pills button { min-width: 0; }
+  .lite-shell .backend-state { max-width: 170px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
+  .workspace-view > .srt-voice-page { grid-template-columns: minmax(320px, 380px) minmax(0, 1fr); gap: var(--space-4); }
+}
+
+@media (max-width: 1024px) {
+  .lite-shell .topbar { grid-template-columns: 185px 1fr auto; }
+  .lite-shell .brand span, .ui-language-picker { display: none; }
+  .lite-shell .backend-state { width: 36px; padding: 0; justify-content: center; font-size: 0; }
+  .focused-workspace .workspace { padding: var(--space-4); }
+  .workspace-view > .srt-voice-page { grid-template-columns: 330px minmax(0, 1fr); }
+  .srt-voice-page > .srt-voice-config { grid-template-columns: 1fr; }
+}
