@@ -79,8 +79,11 @@
 /* Phase 3 establishes the shell; detailed form grouping follows in Phase 4. */
 .workspace-view > .srt-voice-page {
   max-width: 1480px;
+  min-height: 620px;
+  height: calc(100vh - 120px);
   display: grid;
   grid-template-columns: minmax(340px, 420px) minmax(560px, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--space-4) var(--space-6);
 }
@@ -107,6 +110,8 @@
 .srt-voice-page > .srt-voice-config {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-self: start;
+  max-height: 100%;
+  overflow: auto;
 }
 
 .srt-voice-page > .srt-run-stats,
@@ -114,6 +119,78 @@
 .srt-voice-page > .srt-voice-footer { margin-top: 0; }
 .srt-voice-page > .srt-voice-table { min-width: 0; }
 .srt-voice-page > .srt-voice-footer { font-size: 13px; }
+
+.srt-voice-page > .srt-sticky-actions {
+  grid-column: 1;
+  grid-row: 4;
+  position: sticky;
+  bottom: 0;
+  z-index: 12;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+}
+
+.srt-sticky-actions > button { min-height: 42px; }
+.srt-sticky-actions > .primary { flex: 1; justify-content: center; }
+
+.srt-config-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 2px 0 var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.srt-config-heading > span {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: white;
+  background: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.srt-config-heading strong,
+.srt-config-heading small { display: block; }
+.srt-config-heading strong { color: var(--text); font-size: 13px; }
+.srt-config-heading small { margin-top: 2px; color: var(--text-muted); font-size: 10px; }
+.srt-config-heading.voice-heading { margin-top: var(--space-1); }
+
+.srt-voice-config > .srt-input-card { grid-column: 1 / -1; }
+.srt-voice-page .srt-voice-config > label { display: grid !important; }
+.srt-voice-page .srt-voice-config > .legacy-service-card { display: none !important; }
+
+.srt-advanced-toggle {
+  grid-column: 1 / -1;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--surface-muted);
+  text-align: left;
+}
+
+.srt-advanced-toggle > span { min-width: 0; flex: 1; }
+.srt-advanced-toggle strong,
+.srt-advanced-toggle small { display: block; }
+.srt-advanced-toggle strong { font-size: 12px; }
+.srt-advanced-toggle small { margin-top: 2px; color: var(--text-muted); font-size: 9px; }
+.srt-advanced-toggle .rotated { transform: rotate(180deg); }
 
 :root[data-theme="dark"] .lite-shell .topbar,
 :root[data-theme="dark"] .srt-voice-page > .lite-engine-switch,
