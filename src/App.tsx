@@ -944,7 +944,7 @@ function FfmpegAndCapCutTab() {
         <label><small>CẤU HÌNH THEO MÁY</small><select value={renderProfile} onChange={(e)=>setRenderProfile(e.target.value as typeof renderProfile)}><option value="weak">Máy yếu · CPU 4 luồng · ít RAM</option><option value="balanced">Cân bằng · GPU tự động</option><option value="fast">Máy mạnh · GPU · cache lớn</option></select></label>
         <div className="panel-card-grid-2">
           <label><small>TÊN KẾT QUẢ</small><input value={jobName} onChange={(e)=>setJobName(e.target.value)}/></label>
-          <label><small>BỘ MÃ HÓA VIDEO</small><select value={encoder} onChange={(e)=>setEncoder(e.target.value)}><option value="auto">Tự động (GPU tốt nhất)</option><option value="nvenc">NVIDIA NVENC</option><option value="amf">AMD AMF</option><option value="qsv">Intel QSV</option><option value="x264">CPU (libx264)</option></select></label>
+          <label><small>BỘ MÃ HÓA VIDEO</small><select value={encoder} onChange={(e)=>setEncoder(e.target.value)}><option value="auto">Tự động</option><option value="nvenc">NVIDIA NVENC</option><option value="amf">AMD AMF</option><option value="qsv">Intel QSV</option><option value="x264">CPU (libx264)</option></select></label>
         </div>
       </div>
     </div>
