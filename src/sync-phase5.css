@@ -170,6 +170,10 @@
 .sync-input-panel > header strong { font-size: 15px; }
 .sync-input-panel > header small { color: var(--text-muted); font-size: 10px; }
 .sync-input-list { display: grid; gap: 10px; padding-top: 16px; }
+.sync-input-panel > .sync-input-list {
+  grid-auto-rows: minmax(82px, 1fr);
+  height: calc(100% - 54px);
+}
 
 .sync-input-row {
   position: relative;
@@ -207,8 +211,22 @@ button.sync-input-row:hover { border-color: color-mix(in srgb, var(--accent) 45%
   min-width: 0;
 }
 
-.sync-right-column .capcut-settings-row { grid-template-columns: 1fr 1fr; margin: 0; }
+.lite-shell .sync-right-column .capcut-settings-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; margin: 0; }
 .sync-right-column .capcut-panel-card { padding: 16px; }
+.sync-right-column .panel-card-grid-3 { grid-template-columns: minmax(0, 1.35fr) minmax(92px, .65fr); }
+.sync-right-column .capcut-panel-card input,
+.sync-right-column .capcut-panel-card select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.lite-shell .capcut-project-page > .capcut-project-page {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 !important;
+}
 
 .sync-progress { padding: 16px; }
 .sync-progress-label { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
@@ -251,7 +269,8 @@ button.sync-input-row:hover { border-color: color-mix(in srgb, var(--accent) 45%
 @media (max-width: 1023px) {
   body { min-width: 0; }
   .sync-workspace-grid { grid-template-columns: 1fr; min-height: 0; }
-  .sync-right-column .capcut-settings-row { grid-template-columns: 1fr; }
+  .lite-shell .sync-right-column .capcut-settings-row { grid-template-columns: 1fr; }
+  .sync-input-panel > .sync-input-list { height: auto; }
   .sync-status-run { position: static; }
 }
 
