@@ -12,6 +12,8 @@ import './capcut-sync.css';
 import './voice-backend-settings.css';
 import './shell-v3.css';
 import './sync-phase5.css';
+import './phase6.css';
+import { useToast } from './components/ui';
 import { AudioLines, Captions, Check, ChevronDown, CircleHelp, Clapperboard, Download, DownloadCloud, FileText, FolderOpen, Languages, Loader2, Mic2, Moon, MoreHorizontal, Pause, Play, RefreshCw, Search, Settings2, Sliders, Sparkles, Square, Sun, Trash2, UploadCloud, Volume2, X, Zap } from 'lucide-react';
 
 type Page = 'studio' | 'translate' | 'srt' | 'capcut' | 'settings';
@@ -24,6 +26,10 @@ type SrtGenerationResult = { state: 'cancelled'|'completed'; completed: number; 
 type ApiVoice = { id: string; name: string; previewUrl?: string; language?: string; provider?: string; personal?: boolean };
 
 const cleanUnicode = (value: string) => new TextDecoder().decode(new TextEncoder().encode(value));
+const subtitleTimeMs = (value: string) => {
+  const parts = value.replace(',', '.').split(':').map(Number);
+  return parts.length === 3 && parts.every(Number.isFinite) ? ((parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000) : Number.NaN;
+};
 
 const nav: { id: Page; label: string; icon: typeof Sparkles }[] = [
   { id: 'srt', label: 'Tạo voice SRT', icon: FileText },
@@ -332,6 +338,7 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
 }
 
 function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft: SrtDraft | null }) {
+  const { showToast } = useToast();
   const [engine, setEngine] = useState<'omnivoice' | 'vieneu' | 'ai33' | 'aimax' | 'capcut'>('capcut');
   const [apiProvider, setApiProvider] = useState('minimax');
   const [apiModel, setApiModel] = useState('speech-2.8-hd');
@@ -564,6 +571,27 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   };
   const [autoRetry, setAutoRetry] = useState(true);
   const [advancedVoiceOptions, setAdvancedVoiceOptions] = useState(false);
+  const saveVoicePreset = () => {
+    localStorage.setItem('hhvietsub.voicePreset', JSON.stringify({engine,apiProvider,apiModel,apiVoiceId,apiWorkers,apiRequestInterval,subtitleLanguage,speed,capcutBackend,autoRetry}));
+    showToast({kind:'success',title:'Đã lưu preset tạo voice',message:'Cấu hình hiện tại sẽ được dùng lại khi cần.'});
+  };
+  const restoreVoicePreset = () => {
+    try {
+      const preset = JSON.parse(localStorage.getItem('hhvietsub.voicePreset') || 'null') as Partial<{engine:typeof engine;apiProvider:string;apiModel:string;apiVoiceId:string;apiWorkers:number;apiRequestInterval:number;subtitleLanguage:string;speed:number;capcutBackend:typeof capcutBackend;autoRetry:boolean}> | null;
+      if (!preset) return showToast({kind:'info',title:'Chưa có preset đã lưu'});
+      if (preset.engine) setEngine(preset.engine);
+      if (preset.apiProvider) setApiProvider(preset.apiProvider);
+      if (preset.apiModel) setApiModel(preset.apiModel);
+      if (typeof preset.apiVoiceId === 'string') setApiVoiceId(preset.apiVoiceId);
+      if (preset.apiWorkers) setApiWorkers(preset.apiWorkers);
+      if (typeof preset.apiRequestInterval === 'number') setApiRequestInterval(preset.apiRequestInterval);
+      if (preset.subtitleLanguage) setSubtitleLanguage(preset.subtitleLanguage);
+      if (preset.speed) setSpeed(preset.speed);
+      if (preset.capcutBackend) setCapcutBackend(preset.capcutBackend);
+      if (typeof preset.autoRetry === 'boolean') setAutoRetry(preset.autoRetry);
+      showToast({kind:'success',title:'Đã khôi phục preset'});
+    } catch { showToast({kind:'error',title:'Preset không hợp lệ',message:'Hãy lưu lại một preset mới.'}); }
+  };
   const runQueue = async () => {
     if (!window.desktop || running || !queue.some((item) => item.status !== 'completed')) return;
     if (engine === 'omnivoice' && !voiceId) return setMessage('Hãy chọn một hồ sơ giọng OmniVoice hoàn chỉnh.');
@@ -629,6 +657,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     const entries = selectedRows || (only ? [only] : draft.rows.filter((row) => row.text.trim()));
     const jobId = `srt-${Date.now()}`; setActiveJobId(jobId); setJobState('running');
     setRunning(true); setProgress({ done: 0, total: entries.length });
+    if (retryPass === 0) showToast({kind:'info',title:'Đã bắt đầu tạo voice',message:`${entries.length} câu · ${draft.name}`});
     setDraft((current) => current ? { ...current, rows: current.rows.map((row) => entries.some((e) => e.id === row.id) ? { ...row, status: 'pending' as const, error: undefined } : row) } : current);
     try {
       const result = await window.desktop.request<{ state: 'cancelled'|'completed'; completed: number; failed: number; total: number; items: SrtVoiceRow[]; outputDir: string }>(only ? 'srt.voice.regenerate' : 'srt.voice.generate', {
@@ -650,9 +679,11 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
         return run(undefined, failedItems, retryPass + 1);
       }
       setMessage(`${result.state === 'cancelled' ? 'Đã huỷ' : 'Hoàn tất'} ${result.completed}/${result.total} câu${result.failed ? ` · ${result.failed} câu lỗi` : ''}.`);
+      if (result.state !== 'cancelled') showToast(result.failed ? {kind:'error',title:'Job hoàn tất nhưng còn lỗi',message:`${result.failed}/${result.total} câu cần chạy lại.`} : {kind:'success',title:'Tạo voice hoàn tất',message:`Đã tạo ${result.completed}/${result.total} câu.`});
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setMessage(detail); setJobState('cancelled');
+      showToast({kind:'error',title:'Tạo voice thất bại',message:detail});
       setDraft((current) => current ? { ...current, rows: current.rows.map((row) => row.status === 'generating' ? { ...row, status: 'failed' as const, error: detail } : row) } : current);
     }
     finally { setRunning(false); refreshSavedJobs(); }
@@ -661,6 +692,11 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   const play = async (row: SrtVoiceRow) => { if (!row.file) return; const url = await window.desktop?.readAudio(row.file); if (url) { setAudioUrl(url); setTimeout(() => document.querySelector<HTMLAudioElement>('.srt-voice-player')?.play(), 0); } };
   const completed = draft?.rows.filter((row) => row.status === 'completed').length || 0;
   const failed = draft?.rows.filter((row) => row.status === 'failed').length || 0;
+  const longCueCount = draft?.rows.filter((row) => row.text.trim().length > 300).length || 0;
+  const invalidTimestampCount = draft?.rows.filter((row) => {
+    const start = subtitleTimeMs(row.start); const end = subtitleTimeMs(row.end);
+    return !Number.isFinite(start) || !Number.isFinite(end) || end <= start;
+  }).length || 0;
   return <div className="srt-voice-page">
     <div className="srt-voice-hero"><div><h1>Tạo giọng từ <span>file hoặc thư mục SRT.</span></h1><p>Chọn nguồn, giọng đọc rồi theo dõi toàn bộ hàng chờ ở một màn hình.</p></div><button className="secondary folder-queue" disabled={running} onClick={chooseSrtFolder}><FolderOpen size={16} /> Chọn thư mục SRT</button></div>
     <section className="srt-output-bar"><div><FolderOpen size={17}/><span><small>JOB ĐÃ LƯU · KHÔNG TỰ ĐỘNG TẢI</small><select value={selectedJobId} onChange={(e)=>setSelectedJobId(e.target.value)}><option value="">Chọn job muốn mở…</option>{savedJobs.map((job)=><option key={job.jobId} value={job.jobId}>{job.createdAt || job.jobId} · {job.engine} · {job.voiceId || 'chưa chọn giọng'} · {job.completed}/{job.total}{job.failed?` · ${job.failed} lỗi`:''}</option>)}</select></span></div><button disabled={!selectedJobId||running} onClick={loadSavedJob}>Tải job</button><button disabled={running} onClick={()=>{setSelectedJobId('');setDraft(null);setOutputDir('');setProgress({done:0,total:0});setJobState('idle');setMessage('Đã tạo phiên trống. Hãy chọn file SRT mới.');}}>Job mới</button></section>
@@ -694,6 +730,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
       {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>NGÔN NGỮ PHỤ ĐỀ</small><select value={subtitleLanguage} onChange={(e)=>{setSubtitleLanguage(e.target.value);setApiVoices([]);setApiVoiceId('');}}><option value="auto">Tự động nhận diện</option><option value="Vietnamese">Tiếng Việt</option><option value="English">Tiếng Anh</option><option value="Spanish">Tiếng Tây Ban Nha</option><option value="French">Tiếng Pháp</option><option value="German">Tiếng Đức</option><option value="Portuguese">Tiếng Bồ Đào Nha</option><option value="Italian">Tiếng Ý</option><option value="Japanese">Tiếng Nhật</option><option value="Korean">Tiếng Hàn</option><option value="Chinese">Tiếng Trung</option><option value="Thai">Tiếng Thái</option><option value="Indonesian">Tiếng Indonesia</option><option value="Russian">Tiếng Nga</option><option value="Arabic">Tiếng Ả Rập</option></select><span>Dùng để lọc giọng và tạo đúng phát âm</span></label>}
       <button className="srt-advanced-toggle" type="button" aria-expanded={advancedVoiceOptions} onClick={()=>setAdvancedVoiceOptions((current)=>!current)}><Settings2 size={15}/><span><strong>Tùy chọn nâng cao</strong><small>Luồng API, delay, retry và từ điển</small></span><ChevronDown size={16} className={advancedVoiceOptions?'rotated':''}/></button>
       {advancedVoiceOptions&&<>
+      <div className="voice-preset-actions"><button type="button" onClick={saveVoicePreset}><Download size={14}/> Lưu preset</button><button type="button" onClick={restoreVoicePreset}><RefreshCw size={14}/> Khôi phục</button></div>
       {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>SỐ LUỒNG API</small><input type="number" min="1" max="32" value={apiWorkers} onChange={(e)=>setApiWorkers(Math.min(32,Math.max(1,Number(e.target.value)||1)))}/><span>Tối đa request đang xử lý song song</span></label>}
       {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>DELAY GỬI API · GIÂY</small><input type="number" min="0" max="60" step="0.5" value={apiRequestInterval} onChange={(e)=>{const value=Math.min(60,Math.max(0,Number(e.target.value)||0));setApiRequestInterval(value);localStorage.setItem('hhvietsub.apiRequestInterval',String(value));}}/><span>Khoảng cách giữa hai request: {apiRequestInterval}s{engine==='capcut'&&capcutBackend==='hybrid'?' trên mỗi nguồn':''}</span></label>}
       <label><small>TỰ ĐỘNG RETRY LỖI</small><button type="button" onClick={() => setAutoRetry(!autoRetry)} style={{ border: autoRetry ? '1px solid #7edab7' : '1px solid #dfe3f0', borderRadius: 8, padding: '7px 8px', fontSize: 10, fontWeight: 700, cursor: 'pointer', background: autoRetry ? '#ecfbf5' : '#f4f5fa', color: autoRetry ? '#178360' : '#778198', display: 'flex', alignItems: 'center', gap: 5 }}>{autoRetry ? <><RefreshCw size={12} /> Bật (Tối đa 3 lượt)</> : 'Tắt'}</button></label>
@@ -708,7 +745,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
       <button className="primary" disabled={!draft?.rows.length || running || (engine==='capcut'&&!apiVoiceId)} title={engine==='capcut'&&!apiVoiceId?'Đang chờ tải và chọn giọng CapCut':''} onClick={() => run()}>{running ? <><RefreshCw className="spin" size={17} /> {jobState==='paused'?'Đã tạm dừng':`Đang tạo ${progress.done}/${progress.total}`}</> : engine==='capcut'&&!apiVoiceId ? <><RefreshCw className={voiceLibraryLoading?'spin':''} size={17}/> {voiceLibraryLoading?'Đang tải giọng…':'Chọn giọng trước'}</> : <><Play size={17} /> {jobState==='cancelled'?'Tiếp tục phần còn lại':'Tạo voice'}</>}</button>
     </section>
     {voiceLibraryOpen && <section className="api-voice-library"><header><div><strong>Thư viện giọng {engine === 'ai33' ? 'AI33' : engine === 'aimax' ? 'AIMax' : 'CapCut Space'}</strong><small>{engine === 'capcut' ? 'tony2k/ai-voice-studio' : apiProvider} · {apiVoices.length} giọng</small></div><div className="api-voice-search"><Search size={14}/><input value={voiceQuery} onChange={(e)=>setVoiceQuery(e.target.value)} placeholder="Tìm tên hoặc Voice ID"/></div><button onClick={()=>setVoiceLibraryOpen(false)}><X size={16}/></button></header><div className="api-voice-list">{voiceLibraryLoading ? <div className="api-voice-empty"><RefreshCw className="spin"/> Đang tải thư viện…</div> : apiVoices.filter((v)=>`${v.name} ${v.id}`.toLowerCase().includes(voiceQuery.toLowerCase())).map((voice)=><article key={voice.id} className={apiVoiceId === voice.id ? 'selected' : ''}><div className="api-voice-avatar">{voice.name.slice(0,2).toUpperCase()}</div><div><strong>{voice.name}</strong><small>{voice.language || 'Không rõ ngôn ngữ'} · {voice.id}</small></div><button disabled={!voice.previewUrl} onClick={()=>playApiVoice(voice)} title="Nghe thử"><Play size={14}/></button><button className="choose" onClick={()=>chooseApiVoice(voice)}>Chọn</button></article>)}{!voiceLibraryLoading && !apiVoices.length && <div className="api-voice-empty">Không tìm thấy giọng phù hợp hoặc dịch vụ đang tạm ngủ. Hãy thử lại sau.</div>}</div></section>}
-    <div className="srt-run-stats"><span>{draft?.rows.length || 0} câu</span><span className="ok">{completed} hoàn thành</span><span className={failed ? 'bad' : ''}>{failed} lỗi</span><div><i style={{ width: `${progress.total ? progress.done / progress.total * 100 : 0}%` }} /></div></div>
+    <div className="srt-run-stats"><span>{draft?.rows.length || 0} câu</span><span className="ok">{completed} hoàn thành</span><span className={failed ? 'bad' : ''}>{failed} lỗi</span>{longCueCount>0&&<span className="warn">{longCueCount} câu quá dài</span>}{invalidTimestampCount>0&&<span className="bad">{invalidTimestampCount} timestamp lỗi</span>}<div><i style={{ width: `${progress.total ? progress.done / progress.total * 100 : 0}%` }} /></div></div>
     <section className="srt-voice-table"><header><span># / THỜI GIAN</span><span>NỘI DUNG ĐỌC</span><span>TRẠNG THÁI</span><span>THAO TÁC</span></header>{draft?.rows.length ? draft.rows.map((row) => <article key={row.id}><div><b>{String(row.id).padStart(4, '0')}</b><small>{row.start} → {row.end}</small></div><textarea value={row.text} disabled={running} onChange={(e) => updateText(row.id, e.target.value)} /><div className={`voice-row-status ${row.status}`}><strong>{row.status === 'completed' ? 'Hoàn thành' : row.status === 'failed' ? 'Lỗi' : row.status === 'generating' ? 'Đang tạo' : 'Chờ'}</strong><small>{row.duration ? `${row.duration.toFixed(2)} giây` : row.error || `${String(row.id).padStart(4, '0')}.wav`}</small></div><div className="voice-row-actions"><button disabled={!row.file} onClick={() => play(row)} title="Nghe"><Play size={15} /></button><button disabled={running || !row.text.trim()} onClick={() => run(row)} title="Tạo lại"><RefreshCw size={15} /></button></div></article>) : <div className="subtitle-empty"><UploadCloud size={30} /><strong>Chưa có dữ liệu SRT</strong><small>Chọn file SRT ở panel bên trái hoặc quét cả thư mục để tạo hàng chờ.</small></div>}</section>
     {dictionaryOpen&&<div className="dictionary-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setDictionaryOpen(false)}}><section className="dictionary-modal"><header><div><strong>Từ điển phát âm CapCut</strong><small>Thay từ sai hoặc tiếng Anh bằng cách viết để TTS đọc đúng trước khi tạo MP3.</small></div><button onClick={()=>setDictionaryOpen(false)}><X size={18}/></button></header><div className="dictionary-actions"><button onClick={()=>saveDictionary([...pronunciationDictionary,{id:`dict-${Date.now()}`,source:'',target:''}])}>+ Thêm từ</button><button onClick={()=>dictionaryImportRef.current?.click()}><UploadCloud size={14}/> Nhập JSON</button><button onClick={exportDictionary}><Download size={14}/> Xuất JSON</button><button className="apply" onClick={applyDictionaryToDraft}><Check size={14}/> Áp dụng vào SRT</button><input ref={dictionaryImportRef} type="file" accept=".json,application/json" hidden onChange={(e)=>{void importDictionary(e.target.files?.[0]);e.currentTarget.value=''}}/></div><div className="dictionary-head"><span>TỪ GỐC / TIẾNG ANH</span><span>CÁCH VIẾT ĐỂ ĐỌC</span><span/></div><div className="dictionary-list">{pronunciationDictionary.map((item)=><article key={item.id}><input value={item.source} onChange={(e)=>saveDictionary(pronunciationDictionary.map((row)=>row.id===item.id?{...row,source:e.target.value}:row))} placeholder="Ví dụ: Facebook"/><input value={item.target} onChange={(e)=>saveDictionary(pronunciationDictionary.map((row)=>row.id===item.id?{...row,target:e.target.value}:row))} placeholder="Ví dụ: phây búc"/><button title="Xóa" onClick={()=>saveDictionary(pronunciationDictionary.filter((row)=>row.id!==item.id))}><Trash2 size={15}/></button></article>)}{!pronunciationDictionary.length&&<div className="dictionary-empty">Chưa có quy tắc. Bấm “Thêm từ” hoặc nhập file JSON.</div>}</div><footer><span>{pronunciationDictionary.length} quy tắc · tự động áp dụng khi tạo voice</span><button onClick={()=>setDictionaryOpen(false)}>Đóng</button></footer></section></div>}
     {jobPickerOpen&&<div className="dictionary-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setJobPickerOpen(false)}}><section className="saved-job-modal"><header><div><strong>Mở job tạo voice đã lưu</strong><small>Chỉ tải job khi bạn chủ động chọn.</small></div><button onClick={()=>setJobPickerOpen(false)}><X size={18}/></button></header><div className="saved-job-picker"><select value={selectedJobId} onChange={(e)=>setSelectedJobId(e.target.value)}><option value="">Chọn job muốn mở…</option>{savedJobs.map((job)=><option key={job.jobId} value={job.jobId}>{job.createdAt||job.jobId} · {job.engine} · {job.completed}/{job.total}{job.failed?` · ${job.failed} lỗi`:''}</option>)}</select>{!savedJobs.length&&<p>Chưa có job nào được lưu.</p>}</div><footer><button onClick={()=>{setSelectedJobId('');setDraft(null);setOutputDir('');setProgress({done:0,total:0});setJobState('idle');setJobPickerOpen(false);setMessage('Đã tạo phiên trống. Hãy chọn file SRT mới.');}}>Job mới</button><button className="primary" disabled={!selectedJobId} onClick={async()=>{await loadSavedJob();setJobPickerOpen(false)}}>Tải job đã chọn</button></footer></section></div>}
@@ -718,6 +755,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
 }
 
 function FfmpegAndCapCutTab() {
+  const { showToast } = useToast();
   const [videoPath, setVideoPath] = useState('');
   const [srtPath, setSrtPath] = useState('');
   const [voiceDir, setVoiceDir] = useState('');
@@ -789,10 +827,11 @@ function FfmpegAndCapCutTab() {
   const create = async () => {
     if(!window.desktop||!analysis?.ready||!outputDir||running)return;
     setRunning(true);setLogs([]);setResult(null);setProgressPercent(0);setMessage('Đang lập kế hoạch đồng bộ…');
+    showToast({kind:'info',title:'Đã bắt đầu đồng bộ',message:'FFmpeg đang chuẩn bị và kiểm tra các đoạn video.'});
     const profileEncoder = renderProfile === 'weak' ? 'x264' : encoder;
     const chunkPieces = renderProfile === 'weak' ? 6 : renderProfile === 'balanced' ? 12 : 24;
-    try { const value=await window.desktop.request<{projectName:string;projectPath:string;template:string}>('ffmpeg.sync.create',{videoPath,srtPath,voiceDir,outputDir,projectName:jobName,chunkPieces,encoder:profileEncoder,voiceSpeed,changePitch,videoVolumeDb:-35,mergeAudio:false,renderProfile}); setResult(value);setProgressPercent(100);setMessage(`Hoàn tất: ${value.projectName}`); }
-    catch(error){setMessage(error instanceof Error?error.message:String(error));} finally{setRunning(false);}
+    try { const value=await window.desktop.request<{projectName:string;projectPath:string;template:string}>('ffmpeg.sync.create',{videoPath,srtPath,voiceDir,outputDir,projectName:jobName,chunkPieces,encoder:profileEncoder,voiceSpeed,changePitch,videoVolumeDb:-35,mergeAudio:false,renderProfile}); setResult(value);setProgressPercent(100);setMessage(`Hoàn tất: ${value.projectName}`);showToast({kind:'success',title:'Đồng bộ hoàn tất',message:value.projectName}); }
+    catch(error){const detail=error instanceof Error?error.message:String(error);setMessage(detail);showToast({kind:'error',title:'Đồng bộ thất bại',message:detail});} finally{setRunning(false);}
   };
   return <div className="capcut-project-page" style={{ paddingTop: '10px' }}>
     <div className="capcut-project-hero"><div><h1>Co giãn video theo <span>voice nguyên bản.</span></h1><p>Xuất video đồng bộ độc lập; không ghép audio và không cần mở CapCut.</p></div></div>
@@ -851,6 +890,7 @@ function FfmpegAndCapCutTab() {
 }
 
 function CapCutProjectPage() {
+  const { showToast } = useToast();
   const [subtab, setSubtab] = useState<'ffmpeg' | 'capcut'>('ffmpeg');
   const [mode, setMode] = useState<'new'|'existing'>('existing');
   const [projects, setProjects] = useState<{name:string;path:string}[]>([]);
@@ -887,10 +927,11 @@ function CapCutProjectPage() {
   const create = async () => {
     if (!window.desktop || !analysis?.ready || running) return;
     setRunning(true); setLogs([]); setResult(null); setMessage(mode === 'new' ? 'Đang chuẩn bị project mới…' : 'Đang sao lưu và đồng bộ dự án có sẵn…');
+    showToast({kind:'info',title:'Đã bắt đầu cập nhật CapCut',message:'Dự án sẽ được sao lưu trước khi thay đổi.'});
     try {
       const created = await window.desktop.request<{ projectName: string; projectPath: string; template: string }>(mode === 'new' ? 'capcut.project.create' : 'capcut.project.sync', { videoPath, projectPath, srtPath, voiceDir, projectName });
-      setResult(created); setMessage(`Hoàn tất project: ${created.projectName}`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+      setResult(created); setMessage(`Hoàn tất project: ${created.projectName}`); showToast({kind:'success',title:'Cập nhật CapCut hoàn tất',message:created.projectName});
+    } catch (error) { const detail=error instanceof Error ? error.message : String(error); setMessage(detail); showToast({kind:'error',title:'Cập nhật CapCut thất bại',message:detail}); }
     finally { setRunning(false); }
   };
   const fileName = (value: string) => value.split(/[\\/]/).at(-1) || '';

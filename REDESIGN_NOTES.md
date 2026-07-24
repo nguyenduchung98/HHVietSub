@@ -217,3 +217,31 @@ Kiến trúc xử lý backend/IPC có thể giữ nguyên. Phần cần refactor
 frontend nguyên khối `src/App.tsx` và hệ CSS override. Nên ưu tiên tách module
 trước khi áp dụng layout hai cột; nếu đổi layout ngay trên file hiện tại,
 rủi ro regression ở queue, modal và progress khá cao.
+
+## 10. Trạng thái sau redesign Phase 1–6
+
+Hoàn thành trên nhánh `codex/lite`:
+
+- Design token, base reset, font fallback và nền tảng light/dark.
+- Thư viện component dùng lại: button, field, segmented control, slider, card,
+  badge, progress, spinner và toast.
+- Header gọn và khung làm việc hai cột.
+- Tab tạo voice: nhóm Nguồn/Giọng đọc/Nâng cao, CTA sticky, progress và bảng cue.
+- Tab FFmpeg/CapCut: stepper đầu vào, cấu hình theo máy, progress và CTA sticky.
+- Bản Lite chỉ chỉnh sửa dự án CapCut có sẵn; không đưa tạo project mới trở lại.
+- Toast cho bắt đầu/hoàn tất/lỗi ở TTS, FFmpeg và CapCut.
+- Preset tạo voice lưu trong `localStorage`, có nút lưu và khôi phục.
+- Cảnh báo cue dài hơn 300 ký tự và timestamp không hợp lệ.
+- Dark mode dùng token cho toàn bộ surface chính.
+
+### QA đã thực hiện
+
+- `npm run typecheck`.
+- `npm run build:web`.
+- Kiểm tra trực quan tại 1280×720 cho TTS, FFmpeg và CapCut.
+- Kiểm tra cửa sổ tối thiểu 1024px không tràn ngang.
+- Kiểm tra light/dark và console trình duyệt.
+
+Chưa đóng gói Windows theo yêu cầu. Cần tiếp tục chạy bản Electron dev với dữ
+liệu thật để xác nhận file picker, tạo voice, FFmpeg và ghi project CapCut trước
+khi phát hành.
