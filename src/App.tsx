@@ -11,6 +11,7 @@ import './capcut-project-v1.css';
 import './capcut-sync.css';
 import './voice-backend-settings.css';
 import './shell-v3.css';
+import './sync-phase5.css';
 import { AudioLines, Captions, Check, ChevronDown, CircleHelp, Clapperboard, Download, DownloadCloud, FileText, FolderOpen, Languages, Loader2, Mic2, Moon, MoreHorizontal, Pause, Play, RefreshCw, Search, Settings2, Sliders, Sparkles, Square, Sun, Trash2, UploadCloud, Volume2, X, Zap } from 'lucide-react';
 
 type Page = 'studio' | 'translate' | 'srt' | 'capcut' | 'settings';
@@ -794,12 +795,12 @@ function FfmpegAndCapCutTab() {
     catch(error){setMessage(error instanceof Error?error.message:String(error));} finally{setRunning(false);}
   };
   return <div className="capcut-project-page" style={{ paddingTop: '10px' }}>
-    <div className="capcut-project-hero"><div><div className="eyebrow"><Clapperboard size={14}/> FFMPEG đồng bộ KHÔNG CẦN CAPCUT</div><h1>Co giãn video theo <span>voice nguyên bản.</span></h1><p>Hỗ trợ WAV/MP3/M4A/FLAC/OGG; tùy chỉnh tốc độ, cao độ và xuất bộ file đồng bộ.</p></div><button className="primary" disabled={!analysis?.ready||!outputDir||!jobName.trim()||running} onClick={create}>{running?<><RefreshCw className="spin" size={17}/> Đang render ({progressPercent}%)…</>:<><Sparkles size={17}/> Đồng bộ & xuất MP4</>}</button></div>
+    <div className="capcut-project-hero"><div><h1>Co giãn video theo <span>voice nguyên bản.</span></h1><p>Xuất video đồng bộ độc lập; không ghép audio và không cần mở CapCut.</p></div></div>
     <section className="capcut-input-grid-4">
-      <button onClick={()=>pickFile('video')}><span className="capcut-step">1</span><Clapperboard size={22}/><div><small>VIDEO GỐC</small><strong>{fileName(videoPath)||'Chọn video'}</strong><em>{videoPath||'MP4, MOV, MKV…'}</em></div></button>
-      <button onClick={()=>pickFile('srt')}><span className="capcut-step">2</span><Captions size={22}/><div><small>PHỤ ĐỀ SRT</small><strong>{fileName(srtPath)||'Chọn file SRT'}</strong><em>{srtPath||'Timestamp băm video'}</em></div></button>
-      <button onClick={()=>pickFolder('voice')}><span className="capcut-step">3</span><AudioLines size={22}/><div><small>THƯ MỤC VOICE</small><strong>{fileName(voiceDir)||'Chọn thư mục voice'}</strong><em>{voiceDir||'0001.wav, mp3, m4a…'}</em></div></button>
-      <button className={outputDir ? 'selected-folder' : ''} onClick={()=>pickFolder('output')}><span className="capcut-step">4</span><FolderOpen size={22}/><div><small>THƯ MỤC XUẤT</small><strong>{outputDir?fileName(outputDir):'Chọn thư mục xuất'}</strong><em>{outputDir||'Nơi lưu video MP4'}</em></div></button>
+      <button className={videoPath?'complete':''} onClick={()=>pickFile('video')}><span className="capcut-step">{videoPath?<Check size={12}/>:1}</span><Clapperboard size={22}/><div><small>VIDEO GỐC</small><strong>{fileName(videoPath)||'Chọn video'}</strong><em>{videoPath||'MP4, MOV, MKV…'}</em></div></button>
+      <button className={srtPath?'complete':''} onClick={()=>pickFile('srt')}><span className="capcut-step">{srtPath?<Check size={12}/>:2}</span><Captions size={22}/><div><small>PHỤ ĐỀ SRT</small><strong>{fileName(srtPath)||'Chọn file SRT'}</strong><em>{srtPath||'Timestamp bám video'}</em></div></button>
+      <button className={voiceDir?'complete':''} onClick={()=>pickFolder('voice')}><span className="capcut-step">{voiceDir?<Check size={12}/>:3}</span><AudioLines size={22}/><div><small>THƯ MỤC VOICE</small><strong>{fileName(voiceDir)||'Chọn thư mục voice'}</strong><em>{voiceDir||'0001.wav, mp3, m4a…'}</em></div></button>
+      <button className={outputDir ? 'selected-folder complete' : ''} onClick={()=>pickFolder('output')}><span className="capcut-step">{outputDir?<Check size={12}/>:4}</span><FolderOpen size={22}/><div><small>THƯ MỤC XUẤT</small><strong>{outputDir?fileName(outputDir):'Chọn thư mục xuất'}</strong><em>{outputDir||'Nơi lưu video MP4'}</em></div></button>
     </section>
 
     <div className="capcut-settings-row">
@@ -845,6 +846,7 @@ function FfmpegAndCapCutTab() {
       {(running || progressPercent > 0) && <div className="ffmpeg-progress-bar-container"><div className="ffmpeg-progress-bar-fill" style={{ width: `${progressPercent}%` }} /></div>}
       <div className="capcut-log">{logs.length?logs.map((line,index)=><p key={`${index}-${line}`}>{line}</p>):<p>FFmpeg sẽ xử lý video độc lập mà không cần CapCut.</p>}</div>{result&&<footer><div><Check size={18}/><span><strong>{result.projectName}</strong><small>{result.template} · {result.projectPath}</small></span></div><button onClick={()=>window.desktop?.showInFolder(result.projectPath)}><FolderOpen size={15}/> Mở kết quả</button></footer>}
     </section>
+    <section className="sync-sticky-cta"><div><strong>{analysis?.ready?'Đầu vào hợp lệ':message}</strong><small>{analysis?.ready?`${analysis.subtitles} phụ đề · ${analysis.voiceFiles} file voice`:'Hoàn tất 4 bước đầu vào để bắt đầu.'}</small></div><button className="primary" disabled={!analysis?.ready||!outputDir||!jobName.trim()||running} onClick={create}>{running?<><RefreshCw className="spin" size={17}/> Đang render ({progressPercent}%)…</>:<><Zap size={17}/> Đồng bộ & xuất MP4</>}</button></section>
   </div>;
 }
 
@@ -859,7 +861,7 @@ function CapCutProjectPage() {
   const [projectName, setProjectName] = useState(`HHVietSub ${new Date().toLocaleDateString('vi-VN').replaceAll('/', '-')}`);
   const [analysis, setAnalysis] = useState<{ subtitles: number; voiceFiles: number; missing: number[]; ready: boolean } | null>(null);
   const [running, setRunning] = useState(false);
-  const [message, setMessage] = useState('Chọn video, SRT và thư mục voice để kiểm tra ánh xạ.');
+  const [message, setMessage] = useState('Chọn dự án CapCut, file SRT và thư mục voice để kiểm tra ánh xạ.');
   const [logs, setLogs] = useState<string[]>([]);
   const [result, setResult] = useState<{ projectName: string; projectPath: string; template: string } | null>(null);
   useEffect(() => { window.desktop?.request<{name:string;path:string}[]>('project.list').then((items)=>{setProjects(items || []);if(items?.length)setProjectPath((value)=>value || items[0].path);}).catch(()=>undefined); }, []);
@@ -898,7 +900,7 @@ function CapCutProjectPage() {
       <button className={subtab === 'capcut' ? 'active' : ''} onClick={() => setSubtab('capcut')}><Clapperboard size={15} /> Dự án CapCut</button>
     </div>
     {subtab === 'ffmpeg' ? <FfmpegAndCapCutTab /> : <>
-      <div className="capcut-project-hero"><div><div className="eyebrow"><Clapperboard size={14} /> VOICE SYNC CHO CAPCUT</div><h1>Thêm voice và <span>đồng bộ timeline.</span></h1><p>Ghép voice theo từng câu SRT vào dự án mới hoặc dự án CapCut có sẵn.</p></div><button className="primary" disabled={!analysis?.ready || (mode === 'new' && !projectName.trim()) || running} onClick={create}>{running ? <><RefreshCw className="spin" size={17} /> Đang đồng bộ…</> : <><Sparkles size={17} /> {mode === 'new' ? 'Tạo dự án & đồng bộ' : 'Thêm voice & đồng bộ'}</>}</button></div>
+      <div className="capcut-project-hero"><div><h1>Thêm voice và <span>đồng bộ timeline.</span></h1><p>Chỉnh sửa dự án CapCut có sẵn và tự động sao lưu JSON trước khi ghi.</p></div></div>
       <section className="capcut-mode-switch"><button className={mode === 'existing' ? 'selected' : ''} onClick={()=>setMode('existing')}><Clapperboard size={18}/><span><strong>Dự án có sẵn</strong><small>Giữ media, effect và chỉnh sửa hiện tại</small></span></button><button className={mode === 'new' ? 'selected' : ''} onClick={()=>setMode('new')}><Sparkles size={18}/><span><strong>Tạo dự án mới</strong><small>Bắt đầu từ video gốc và SRT</small></span></button></section>
       <section className="capcut-input-grid">
         {mode === 'new' ? <button onClick={() => pick('video')}><span className="capcut-step">1</span><Clapperboard size={23} /><div><small>VIDEO GỐC</small><strong>{fileName(videoPath) || 'Chọn video'}</strong><em>{videoPath || 'MP4, MOV, MKV…'}</em></div></button> : <label className="capcut-project-picker"><span className="capcut-step">1</span><Clapperboard size={23}/><div><small>DỰ ÁN CAPCUT CÓ SẴN</small><select value={projectPath} onChange={(e)=>setProjectPath(e.target.value)}><option value="">Chọn dự án…</option>{projects.map((project)=><option key={project.path} value={project.path}>{project.name}</option>)}</select><em>{projectPath || 'Không tìm thấy dự án CapCut'}</em></div></label>}
@@ -908,6 +910,7 @@ function CapCutProjectPage() {
       <section className={`capcut-project-settings ${mode === 'existing' ? 'existing' : ''}`}>{mode === 'new' && <label><small>TÊN DỰ ÁN MỚI</small><input value={projectName} onChange={(e) => setProjectName(e.target.value)} /></label>}<div className={`capcut-readiness ${analysis?.ready ? 'ready' : analysis ? 'warning' : ''}`}><Check size={18} /><span><strong>{analysis ? `${analysis.voiceFiles}/${analysis.subtitles} voice đã khớp` : 'Chưa kiểm tra đầu vào'}</strong><small>{analysis?.missing.length ? `Thiếu: ${analysis.missing.slice(0, 12).map((id) => String(id).padStart(4, '0')).join(', ')}` : mode === 'existing' ? 'JSON dự án sẽ được sao lưu trước khi đồng bộ.' : 'Dự án mới sẽ được lưu vào thư mục CapCut mặc định.'}</small></span></div></section>
       <section className="capcut-flow"><div><span>1</span><strong>{mode === 'existing' ? 'Sao lưu dự án' : 'Tạo project mới'}</strong><small>{mode === 'existing' ? 'Snapshot JSON an toàn' : 'Sinh schema CapCut sạch'}</small></div><i>→</i><div><span>2</span><strong>Ghép SRT + voice</strong><small>0001.wav ↔ câu 0001</small></div><i>→</i><div><span>3</span><strong>Cắt video</strong><small>Theo từng block phụ đề</small></div><i>→</i><div><span>4</span><strong>Đồng bộ</strong><small>Voice quyết định timeline</small></div></section>
       <section className="capcut-progress-panel"><header><div><small>TIẾN TRÌNH</small><strong>{message}</strong></div><span>{running ? 'ĐANG XỬ LÝ' : result ? 'HOÀN TẤT' : 'SẴN SÀNG'}</span></header><div className="capcut-log">{logs.length ? logs.map((line, index) => <p key={`${index}-${line}`}>{line}</p>) : <p>Chưa có tác vụ. Tool sẽ yêu cầu đóng CapCut trước khi ghi project.</p>}</div>{result && <footer><div><Check size={18} /><span><strong>{result.projectName}</strong><small>{result.template} · {result.projectPath}</small></span></div><button onClick={() => window.desktop?.showInFolder(result.projectPath)}><FolderOpen size={15} /> Mở thư mục</button><button className="open-capcut" onClick={() => window.desktop?.request('capcut.open')}><Clapperboard size={15} /> Mở CapCut</button></footer>}</section>
+      <section className="sync-sticky-cta"><div><strong>{analysis?.ready?'Dự án đã sẵn sàng':message}</strong><small>CapCut sẽ được yêu cầu đóng trước khi cập nhật project.</small></div><button className="primary" disabled={!analysis?.ready || running} onClick={create}>{running ? <><RefreshCw className="spin" size={17} /> Đang đồng bộ…</> : <><Sparkles size={17} /> Thêm voice & đồng bộ</>}</button></section>
     </>}
   </div>;
 }

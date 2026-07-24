@@ -1,0 +1,138 @@
+.workspace-view > .capcut-project-page {
+  max-width: 1240px;
+  min-height: calc(100vh - 120px);
+  padding: 0 0 88px !important;
+}
+
+.lite-shell .capcut-subtab-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin-bottom: var(--space-4);
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface-muted) 92%, transparent);
+}
+
+.lite-shell .capcut-subtab-bar button {
+  min-height: 36px;
+  color: var(--text-muted);
+}
+
+.lite-shell .capcut-subtab-bar button.active {
+  color: var(--accent);
+  background: var(--surface);
+}
+
+.lite-shell .capcut-project-page {
+  color: var(--text);
+}
+
+.lite-shell .capcut-project-hero {
+  margin: 0 0 var(--space-4);
+}
+
+.lite-shell .capcut-project-hero h1 {
+  color: var(--text);
+  font-size: 28px;
+  letter-spacing: -.04em;
+}
+
+.lite-shell .capcut-project-hero p { color: var(--text-muted); font-size: 12px; }
+
+.lite-shell .capcut-input-grid-4,
+.lite-shell .capcut-input-grid {
+  gap: var(--space-2);
+}
+
+.lite-shell .capcut-input-grid-4 > button,
+.lite-shell .capcut-input-grid > button,
+.lite-shell .capcut-project-picker {
+  min-height: 82px;
+  border-color: var(--border);
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.lite-shell .capcut-input-grid-4 > button.complete,
+.lite-shell .capcut-input-grid > button.complete {
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+  background: color-mix(in srgb, var(--success) 5%, var(--surface));
+}
+
+.lite-shell .capcut-input-grid-4 > button.complete .capcut-step {
+  color: white;
+  background: var(--success);
+}
+
+.lite-shell .capcut-panel-card,
+.lite-shell .capcut-project-settings > label,
+.lite-shell .capcut-readiness,
+.lite-shell .capcut-flow > div,
+.lite-shell .capcut-progress-panel {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.lite-shell .panel-card-title {
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+}
+
+.lite-shell .capcut-panel-card small,
+.lite-shell .capcut-progress-panel small { color: var(--text-muted); }
+
+.lite-shell .capcut-flow {
+  position: relative;
+  gap: var(--space-2);
+}
+
+.lite-shell .capcut-flow > div {
+  min-height: 64px;
+  justify-content: center;
+}
+
+.lite-shell .capcut-flow > div span {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.lite-shell .capcut-log {
+  height: 130px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+.sync-sticky-cta {
+  position: sticky;
+  bottom: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+}
+
+.sync-sticky-cta > div { min-width: 0; flex: 1; }
+.sync-sticky-cta strong,
+.sync-sticky-cta small { display: block; }
+.sync-sticky-cta strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sync-sticky-cta small { margin-top: 3px; color: var(--text-muted); font-size: 10px; }
+.sync-sticky-cta .primary { min-width: 210px; justify-content: center; box-shadow: none; }
+
+@media (max-width: 1050px) {
+  .sync-sticky-cta small { display: none; }
+  .sync-sticky-cta .primary { min-width: 190px; }
+}
