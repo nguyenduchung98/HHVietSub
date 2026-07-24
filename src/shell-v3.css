@@ -81,6 +81,7 @@
   max-width: 1480px;
   min-height: 620px;
   height: calc(100vh - 120px);
+  padding-top: 8px;
   padding-bottom: 0;
   display: grid;
   grid-template-columns: minmax(340px, 420px) minmax(560px, 1fr);
@@ -89,7 +90,10 @@
   gap: var(--space-4) var(--space-6);
 }
 
-.srt-voice-page > .srt-voice-hero { grid-column: 1 / -1; }
+.srt-voice-page > .srt-voice-hero {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
 .srt-voice-page > .lite-engine-switch { grid-column: 1; grid-row: 2; }
 .srt-voice-page > .srt-voice-config { grid-column: 1; grid-row: 3; }
 .srt-voice-page > .srt-voice-table { grid-column: 2; grid-row: 2 / 4; align-self: stretch; }
