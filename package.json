@@ -1,7 +1,7 @@
 {
   "name": "hhvietsub-lite",
   "version": "0.1.0",
-  "packageManager": "npm@10.0.0",
+  "packageManager": "pnpm@10.0.0",
   "description": "HHVietSub Lite - CapCut TTS and low-resource sync",
   "author": "HHVietSub Team",
   "license": "MIT",
