@@ -117,7 +117,21 @@
 .srt-voice-page > .srt-run-stats,
 .srt-voice-page > .srt-voice-table,
 .srt-voice-page > .srt-voice-footer { margin-top: 0; }
-.srt-voice-page > .srt-voice-table { min-width: 0; }
+.srt-voice-page > .srt-voice-table {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.srt-voice-page > .srt-voice-table > header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  box-shadow: 0 1px 0 var(--border);
+}
 .srt-voice-page > .srt-voice-footer { font-size: 13px; }
 
 .srt-voice-page > .srt-sticky-actions {
