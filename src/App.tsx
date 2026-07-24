@@ -24,6 +24,29 @@ type SrtDraft = { name: string; path: string; rows: SrtVoiceRow[] };
 type SrtQueueItem = { id: string; draft: SrtDraft; status: 'waiting'|'running'|'completed'|'failed'|'cancelled'; done: number; total: number; outputDir?: string; error?: string };
 type SrtGenerationResult = { state: 'cancelled'|'completed'; completed: number; failed: number; total: number; items: SrtVoiceRow[]; outputDir: string };
 type ApiVoice = { id: string; name: string; previewUrl?: string; language?: string; provider?: string; personal?: boolean };
+type VoiceEngine = 'omnivoice' | 'vieneu' | 'ai33' | 'aimax' | 'capcut';
+type CapCutBackend = 'direct' | 'space' | 'hybrid';
+type VoicePreset = {
+  engine: VoiceEngine;
+  apiProvider: string;
+  apiModel: string;
+  apiVoiceId: string;
+  apiWorkers: number;
+  apiRequestInterval: number;
+  subtitleLanguage: string;
+  speed: number;
+  capcutBackend: CapCutBackend;
+  autoRetry: boolean;
+};
+
+const readVoicePreset = (): Partial<VoicePreset> | null => {
+  try {
+    const value = JSON.parse(localStorage.getItem('hhvietsub.voicePreset') || 'null');
+    return value && typeof value === 'object' ? value as Partial<VoicePreset> : null;
+  } catch {
+    return null;
+  }
+};
 
 const cleanUnicode = (value: string) => new TextDecoder().decode(new TextEncoder().encode(value));
 const subtitleTimeMs = (value: string) => {
@@ -339,16 +362,17 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
 
 function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft: SrtDraft | null }) {
   const { showToast } = useToast();
-  const [engine, setEngine] = useState<'omnivoice' | 'vieneu' | 'ai33' | 'aimax' | 'capcut'>('capcut');
-  const [apiProvider, setApiProvider] = useState('minimax');
-  const [apiModel, setApiModel] = useState('speech-2.8-hd');
-  const [apiVoiceId, setApiVoiceId] = useState('');
-  const [apiWorkers, setApiWorkers] = useState(8);
+  const initialVoicePreset = useMemo(() => readVoicePreset(), []);
+  const [engine, setEngine] = useState<VoiceEngine>(() => initialVoicePreset?.engine || 'capcut');
+  const [apiProvider, setApiProvider] = useState(() => initialVoicePreset?.apiProvider || 'minimax');
+  const [apiModel, setApiModel] = useState(() => initialVoicePreset?.apiModel || 'speech-2.8-hd');
+  const [apiVoiceId, setApiVoiceId] = useState(() => initialVoicePreset?.apiVoiceId || '');
+  const [apiWorkers, setApiWorkers] = useState(() => initialVoicePreset?.apiWorkers || 8);
   const [apiRequestInterval, setApiRequestInterval] = useState(() => {
-    const saved = Number(localStorage.getItem('hhvietsub.apiRequestInterval') || 10);
+    const saved = Number(initialVoicePreset?.apiRequestInterval ?? localStorage.getItem('hhvietsub.apiRequestInterval') ?? 10);
     return Number.isFinite(saved) ? Math.min(60, Math.max(0, saved)) : 10;
   });
-  const [subtitleLanguage, setSubtitleLanguage] = useState('auto');
+  const [subtitleLanguage, setSubtitleLanguage] = useState(() => initialVoicePreset?.subtitleLanguage || 'auto');
   const [omniLanguage, setOmniLanguage] = useState('auto');
   const [omniLanguages, setOmniLanguages] = useState<{id:string;name:string}[]>([{id:'auto',name:'Tự động nhận diện'},{id:'vi',name:'Vietnamese'},{id:'en',name:'English'},{id:'es',name:'Spanish'}]);
   const [apiVoices, setApiVoices] = useState<ApiVoice[]>([]);
@@ -362,7 +386,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState('Chọn file SRT ở panel bên trái để bắt đầu.');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(() => initialVoicePreset?.speed || 1);
   const [steps, setSteps] = useState(32);
   const [guidance, setGuidance] = useState(2);
   const [vieneuBatchSize, setVieneuBatchSize] = useState(8);
@@ -375,7 +399,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   const [jobPickerOpen, setJobPickerOpen] = useState(false);
   const [queue, setQueue] = useState<SrtQueueItem[]>([]);
   const [queueRunning, setQueueRunning] = useState(false);
-  const [capcutBackend, setCapcutBackend] = useState<'direct'|'space'|'hybrid'>('hybrid');
+  const [capcutBackend, setCapcutBackend] = useState<CapCutBackend>(() => initialVoicePreset?.capcutBackend || 'hybrid');
   const [dictionaryOpen, setDictionaryOpen] = useState(false);
   const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
   const [ai33Key, setAi33Key] = useState('');
@@ -569,7 +593,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
       setPreviewUrl(url); setTimeout(() => document.querySelector<HTMLAudioElement>('.api-voice-preview-player')?.play(), 0);
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
-  const [autoRetry, setAutoRetry] = useState(true);
+  const [autoRetry, setAutoRetry] = useState(() => initialVoicePreset?.autoRetry ?? true);
   const [advancedVoiceOptions, setAdvancedVoiceOptions] = useState(false);
   const saveVoicePreset = () => {
     localStorage.setItem('hhvietsub.voicePreset', JSON.stringify({engine,apiProvider,apiModel,apiVoiceId,apiWorkers,apiRequestInterval,subtitleLanguage,speed,capcutBackend,autoRetry}));
@@ -577,7 +601,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   };
   const restoreVoicePreset = () => {
     try {
-      const preset = JSON.parse(localStorage.getItem('hhvietsub.voicePreset') || 'null') as Partial<{engine:typeof engine;apiProvider:string;apiModel:string;apiVoiceId:string;apiWorkers:number;apiRequestInterval:number;subtitleLanguage:string;speed:number;capcutBackend:typeof capcutBackend;autoRetry:boolean}> | null;
+      const preset = readVoicePreset();
       if (!preset) return showToast({kind:'info',title:'Chưa có preset đã lưu'});
       if (preset.engine) setEngine(preset.engine);
       if (preset.apiProvider) setApiProvider(preset.apiProvider);
