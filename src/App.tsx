@@ -931,7 +931,6 @@ function FfmpegAndCapCutTab() {
               <small>CAO ĐỘ (PITCH)</small>
             </div>
             <div className="pitch-switch-row" style={{ marginTop: '6px' }}>
-              <strong>Thay đổi cao độ</strong>
               <input type="checkbox" checked={changePitch} onChange={(e)=>setChangePitch(e.target.checked)} />
             </div>
           </label>
