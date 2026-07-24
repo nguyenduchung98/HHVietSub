@@ -652,10 +652,16 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
         <button className={engine==='ai33'?'active':''} onClick={()=>{setEngine('ai33');setApiVoiceId('');setApiVoices([]);}}>AI33 API</button>
         <button className={engine==='aimax'?'active':''} onClick={()=>{setEngine('aimax');setApiVoiceId('');setApiVoices([]);}}>AIMax API</button>
       </div>
+      <div className="lite-engine-actions">
+      <button type="button" onClick={()=>setJobPickerOpen(true)}>
+        <FolderOpen size={15}/> Job đã lưu
+        <b>{savedJobs.length}</b>
+      </button>
       <button type="button" onClick={()=>{setApiSettingsOpen(true);void loadApiKeyStatus();}}>
         <Settings2 size={15}/> API key
         <b>{apiKeyStatus.ai33KeyCount + apiKeyStatus.aimaxKeyCount}</b>
       </button>
+      </div>
     </section>
     <section className="srt-voice-config">
       <label><small>FILE ĐẦU VÀO</small><strong>{draft?.name || 'Chưa chọn SRT'}</strong><span>{draft ? `${draft.rows.length} câu phụ đề` : 'Có thể nhận trực tiếp từ tab Dịch'}</span></label>
