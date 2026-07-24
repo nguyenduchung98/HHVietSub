@@ -536,7 +536,7 @@ class Worker:
             voice_speed = float(params.get("voiceSpeed", 1.0))
             change_pitch = bool(params.get("changePitch", False))
             video_volume_db = float(params.get("videoVolumeDb", -20.0))
-            merge_audio = bool(params.get("mergeAudio", True))
+            merge_audio = False
             return render(Path(str(params.get("videoPath", ""))), Path(str(params.get("srtPath", ""))),
                           Path(str(params.get("voiceDir", ""))), output_dir,
                           str(params.get("projectName", "")), logger,

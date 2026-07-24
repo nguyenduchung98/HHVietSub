@@ -698,8 +698,6 @@ function FfmpegAndCapCutTab() {
   const [renderProfile, setRenderProfile] = useState<'weak'|'balanced'|'fast'>('weak');
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
   const [changePitch, setChangePitch] = useState(false);
-  const [videoVolumeDb, setVideoVolumeDb] = useState(-20);
-  const [mergeAudio, setMergeAudio] = useState(true);
   const [progressPercent, setProgressPercent] = useState(0);
   const [jobName, setJobName] = useState(`FFmpeg Sync ${new Date().toLocaleDateString('vi-VN').replaceAll('/', '-')}`);
   const [analysis, setAnalysis] = useState<{subtitles:number;voiceFiles:number;missing:number[];ready:boolean;ffmpegReady:boolean;rawVoiceDuration?:number;totalVoiceDuration?:number}|null>(null);
@@ -765,11 +763,11 @@ function FfmpegAndCapCutTab() {
     setRunning(true);setLogs([]);setResult(null);setProgressPercent(0);setMessage('Đang lập kế hoạch đồng bộ…');
     const profileEncoder = renderProfile === 'weak' ? 'x264' : encoder;
     const chunkPieces = renderProfile === 'weak' ? 6 : renderProfile === 'balanced' ? 12 : 24;
-    try { const value=await window.desktop.request<{projectName:string;projectPath:string;template:string}>('ffmpeg.sync.create',{videoPath,srtPath,voiceDir,outputDir,projectName:jobName,chunkPieces,encoder:profileEncoder,voiceSpeed,changePitch,videoVolumeDb,mergeAudio,renderProfile}); setResult(value);setProgressPercent(100);setMessage(`Hoàn tất: ${value.projectName}`); }
+    try { const value=await window.desktop.request<{projectName:string;projectPath:string;template:string}>('ffmpeg.sync.create',{videoPath,srtPath,voiceDir,outputDir,projectName:jobName,chunkPieces,encoder:profileEncoder,voiceSpeed,changePitch,videoVolumeDb:-35,mergeAudio:false,renderProfile}); setResult(value);setProgressPercent(100);setMessage(`Hoàn tất: ${value.projectName}`); }
     catch(error){setMessage(error instanceof Error?error.message:String(error));} finally{setRunning(false);}
   };
   return <div className="capcut-project-page" style={{ paddingTop: '10px' }}>
-    <div className="capcut-project-hero"><div><div className="eyebrow"><Clapperboard size={14}/> FFMPEG đồng bộ KHÔNG CẦN CAPCUT</div><h1>Co giãn video theo <span>voice nguyên bản.</span></h1><p>Hỗ trợ WAV/MP3/M4A/FLAC/OGG; tùy chỉnh tốc độ, cao độ và âm lượng video gốc.</p></div><button className="primary" disabled={!analysis?.ready||!outputDir||!jobName.trim()||running} onClick={create}>{running?<><RefreshCw className="spin" size={17}/> Đang render ({progressPercent}%)…</>:<><Sparkles size={17}/> Đồng bộ & xuất MP4</>}</button></div>
+    <div className="capcut-project-hero"><div><div className="eyebrow"><Clapperboard size={14}/> FFMPEG đồng bộ KHÔNG CẦN CAPCUT</div><h1>Co giãn video theo <span>voice nguyên bản.</span></h1><p>Hỗ trợ WAV/MP3/M4A/FLAC/OGG; tùy chỉnh tốc độ, cao độ và xuất bộ file đồng bộ.</p></div><button className="primary" disabled={!analysis?.ready||!outputDir||!jobName.trim()||running} onClick={create}>{running?<><RefreshCw className="spin" size={17}/> Đang render ({progressPercent}%)…</>:<><Sparkles size={17}/> Đồng bộ & xuất MP4</>}</button></div>
     <section className="capcut-input-grid-4">
       <button onClick={()=>pickFile('video')}><span className="capcut-step">1</span><Clapperboard size={22}/><div><small>VIDEO GỐC</small><strong>{fileName(videoPath)||'Chọn video'}</strong><em>{videoPath||'MP4, MOV, MKV…'}</em></div></button>
       <button onClick={()=>pickFile('srt')}><span className="capcut-step">2</span><Captions size={22}/><div><small>PHỤ ĐỀ SRT</small><strong>{fileName(srtPath)||'Chọn file SRT'}</strong><em>{srtPath||'Timestamp băm video'}</em></div></button>
@@ -803,23 +801,11 @@ function FfmpegAndCapCutTab() {
             </div>
           </label>
 
-          <label className="speed-control-box">
-            <div className="speed-header">
-              <small>ÂM LƯỢNG VIDEO GỐC</small>
-              <span className="speed-badge">{videoVolumeDb <= -35 ? 'Tắt âm' : `${videoVolumeDb} dB`}</span>
-            </div>
-            <input type="range" min="-35" max="0" step="1" value={videoVolumeDb} onChange={(e)=>setVideoVolumeDb(Number(e.target.value))} />
-            <div className="duration-preview">
-              <small>TRỘN VỚI VOICE</small>
-              <span>{videoVolumeDb === -20 ? 'Mặc định (-20dB)' : videoVolumeDb === 0 ? 'Nguyên bản (0dB)' : videoVolumeDb <= -35 ? 'Tắt hoàn toàn' : `${videoVolumeDb}dB`}</span>
-            </div>
-          </label>
         </div>
       </div>
 
       <div className="capcut-panel-card">
         <div className="panel-card-title"><Zap size={15}/> <span>CẤU HÌNH XUẤT</span></div>
-        <label className={`merge-audio-toggle ${mergeAudio?'active':''}`}><input type="checkbox" checked={mergeAudio} onChange={(e)=>setMergeAudio(e.target.checked)}/><span><strong>{mergeAudio?'Có ghép video với audio':'Không ghép audio'}</strong><small>{mergeAudio?'Xuất thêm MP4 hoàn chỉnh có voice.':'Chỉ giữ 3 file: SRT, master voice và video-synced.mp4.'}</small></span></label>
         <label><small>CẤU HÌNH THEO MÁY</small><select value={renderProfile} onChange={(e)=>setRenderProfile(e.target.value as typeof renderProfile)}><option value="weak">Máy yếu · CPU 4 luồng · ít RAM</option><option value="balanced">Cân bằng · GPU tự động</option><option value="fast">Máy mạnh · GPU · cache lớn</option></select></label>
         <div className="panel-card-grid-2">
           <label><small>TÊN KẾT QUẢ</small><input value={jobName} onChange={(e)=>setJobName(e.target.value)}/></label>
