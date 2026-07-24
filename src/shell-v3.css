@@ -86,12 +86,15 @@
 }
 
 .srt-voice-page > .srt-voice-hero { grid-column: 1 / -1; }
-.srt-voice-page > .lite-engine-switch,
-.srt-voice-page > .srt-voice-config { grid-column: 1; }
-.srt-voice-page > .srt-queue-panel,
-.srt-voice-page > .srt-run-stats,
-.srt-voice-page > .srt-voice-table,
-.srt-voice-page > .srt-voice-footer { grid-column: 2; }
+.srt-voice-page > .lite-engine-switch { grid-column: 1; grid-row: 2; }
+.srt-voice-page > .srt-voice-config { grid-column: 1; grid-row: 3; }
+.srt-voice-page > .srt-run-stats { grid-column: 2; grid-row: 2; align-self: center; }
+.srt-voice-page > .srt-voice-table { grid-column: 2; grid-row: 3; align-self: stretch; }
+.srt-voice-page > .srt-voice-footer { grid-column: 2; grid-row: 4; }
+
+.srt-voice-page:has(> .srt-queue-panel) > .srt-queue-panel { grid-column: 2; grid-row: 3; }
+.srt-voice-page:has(> .srt-queue-panel) > .srt-voice-table { grid-row: 4; }
+.srt-voice-page:has(> .srt-queue-panel) > .srt-voice-footer { grid-row: 5; }
 
 .srt-voice-page > .lite-engine-switch,
 .srt-voice-page > .srt-voice-config {
