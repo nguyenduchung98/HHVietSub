@@ -1,9 +1,6 @@
 import unittest
 import sys
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 # Add project root to sys.path
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,7 +13,6 @@ from backend.worker.main import (
     format_srt_time,
     build_srt,
     sanitize_json_value,
-    resolve_runtime_path,
 )
 
 try:
@@ -77,21 +73,6 @@ class TestWorkerUtils(unittest.TestCase):
         sanitized_dict = sanitize_json_value({"key": "lỗi\udc8d"})
         self.assertNotIn("\udc8d", sanitized_dict["key"])
         self.assertEqual(sanitize_json_value(123), 123)
-
-    def test_resolve_runtime_path_prefers_environment_override(self):
-        with tempfile.TemporaryDirectory() as folder:
-            with patch.dict(os.environ, {"HHVIETSUB_TEST_ROOT": folder}):
-                self.assertEqual(resolve_runtime_path("HHVIETSUB_TEST_ROOT", ROOT), Path(folder).resolve())
-
-    def test_resolve_runtime_path_uses_first_existing_candidate(self):
-        with tempfile.TemporaryDirectory() as folder:
-            missing = Path(folder) / "missing"
-            existing = Path(folder) / "existing"
-            existing.mkdir()
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("HHVIETSUB_TEST_ROOT", None)
-                self.assertEqual(resolve_runtime_path("HHVIETSUB_TEST_ROOT", missing, existing), existing.resolve())
-
 
 class TestCapCutProjectUtils(unittest.TestCase):
     @unittest.skipUnless(CAPCUT_ENGINE_AVAILABLE, "CapCut V1 Engine dependencies are not fully available")

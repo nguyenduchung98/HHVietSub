@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-LEGACY_ROOT = Path(os.environ.get(
-    "HHVIETSUB_CAPCUT_BRIDGE_ROOT",
-    r"D:\Dịch-Đồng Bộ\Dich_CapCut_v2",
-)).expanduser().resolve()
+LEGACY_ROOT = Path(
+    os.environ.get("HHVIETSUB_CAPCUT_BRIDGE_ROOT")
+    or Path(__file__).resolve().parents[2] / "runtime" / "CapCutBridge"
+).expanduser().resolve()
 if not LEGACY_ROOT.is_dir():
     raise RuntimeError(
         "Không tìm thấy CapCut bridge. Hãy đặt biến HHVIETSUB_CAPCUT_BRIDGE_ROOT "
@@ -385,10 +385,7 @@ def create_project(video: Path, srt: Path, voice_dir: Path, name: str,
     if not cli.is_file():
         raise RuntimeError("Thiếu bộ tạo project mới capcut-cli")
     node = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
-    ffprobe_candidates = [
-        project_root_path / "vendor" / "ffprobe.exe",
-        Path(r"D:\Tool\CapCutBatchStudio\node_modules\ffprobe-static\bin\win32\x64\ffprobe.exe"),
-    ]
+    ffprobe_candidates = [project_root_path / "vendor" / "ffprobe.exe"]
     ffprobe = next((candidate for candidate in ffprobe_candidates if candidate.is_file()), None)
     command = [str(node), str(cli), "quickstart", project_name, "--video", str(video), "--srt", str(srt), "--drafts", str(root)]
     if ffprobe:

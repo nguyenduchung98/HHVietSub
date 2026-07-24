@@ -11,11 +11,6 @@ interface Window {
     saveAudio: (filePath: string) => Promise<string | null>;
     showInFolder: (filePath: string) => Promise<void>;
     openExternal: (url: string) => Promise<void>;
-    translateWithGem: <T = unknown>(params: unknown) => Promise<T>;
-    openGem: (url: string) => Promise<unknown>;
-    loginGem: () => Promise<unknown>;
-    cancelGem: () => Promise<void>;
-    pauseGem: (paused: boolean) => Promise<{ paused: boolean }>;
     onBackendEvent: (handler: (event: unknown) => void) => () => void;
   };
 }

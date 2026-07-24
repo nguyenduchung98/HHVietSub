@@ -29,8 +29,8 @@ const grantPath = (value: string) => {
 };
 
 const PATH_RESULT_KEYS = new Set([
-  'path', 'file', 'outputDir', 'manifestPath', 'projectPath', 'referenceAudio',
-  'localPath', 'profilePath', 'audioPath', 'videoPath', 'srtPath', 'voiceDir',
+  'path', 'file', 'outputDir', 'manifestPath', 'projectPath',
+  'audioPath', 'videoPath', 'srtPath', 'voiceDir',
 ]);
 
 const RENDERER_RPC_METHODS = new Set([
@@ -189,9 +189,9 @@ app.whenReady().then(async () => {
         setTimeout(() => { if (window && !window.isDestroyed()) window.flashFrame(false); }, 3000);
       }
     }
-    if ((method === 'capcut.project.create' || method === 'capcut.project.sync') && result && Notification.isSupported()) {
+    if (method === 'capcut.project.sync' && result && Notification.isSupported()) {
       const project = result as { projectName?: string };
-      new Notification({ title: 'HHVietSub · Dự án CapCut hoàn tất', body: `Đã tạo và đồng bộ ${project.projectName || 'project mới'}.` }).show();
+      new Notification({ title: 'HHVietSub · Dự án CapCut hoàn tất', body: `Đã cập nhật và đồng bộ ${project.projectName || 'dự án'}.` }).show();
       if (window && !window.isDestroyed()) {
         window.flashFrame(true);
         setTimeout(() => { if (window && !window.isDestroyed()) window.flashFrame(false); }, 3000);

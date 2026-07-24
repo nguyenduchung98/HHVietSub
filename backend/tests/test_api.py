@@ -48,7 +48,6 @@ class TestSecretMigration(unittest.TestCase):
             tts_file = json.loads((user_data / "tts-api-settings.json").read_text(encoding="utf-8"))
             self.assertNotIn("token", voice_file)
             self.assertEqual(tts_file, {})
-            self.assertEqual(worker.settings_get({})["voiceBackend"]["token"], "")
             self.assertNotIn("key-one", json.dumps(worker.tts_settings_get({})))
             self.assertEqual(worker.tts_settings_get({})["ai33KeyCount"], 2)
 
