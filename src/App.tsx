@@ -436,6 +436,14 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   useEffect(() => { if (initialDraft) { setDraft(initialDraft); setMessage(`Đã nhận ${initialDraft.rows.length} câu từ tab Dịch.`); } }, [initialDraft]);
   useEffect(() => { if (!voiceId && voices.length) setVoiceId(voices.find((voice) => voice.ready)?.id || ''); }, [voices, voiceId]);
   useEffect(() => { void loadApiKeyStatus().catch(() => undefined); }, []);
+  useEffect(() => {
+    if (!voiceLibraryOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setVoiceLibraryOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [voiceLibraryOpen]);
   useEffect(() => window.desktop?.onBackendEvent((raw) => {
     const packet = raw as { event?: string; data?: { event?: string; status?: string; message?: string; device?: string; done?: number; total?: number; id?: number; attempt?: number; item?: SrtVoiceRow; jobId?: string; state?: typeof jobState } | string };
     if (packet.event === 'srt.voice.log' && typeof packet.data === 'string') {
@@ -528,10 +536,6 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setVoiceLibraryLoading(false); }
   };
-  useEffect(() => {
-    if (engine !== 'capcut' || apiVoiceId || voiceLibraryLoading) return;
-    void loadApiVoices();
-  }, [engine, subtitleLanguage]);
   const chooseApiVoice = (voice: ApiVoice) => { setApiVoiceId(voice.id); setVoiceLibraryOpen(false); setMessage(`Đã chọn giọng ${voice.name} · ${voice.id}`); };
   const playApiVoice = async (voice: ApiVoice) => {
     if (!voice.previewUrl) return setMessage('Giọng này không có audio nghe thử.');
