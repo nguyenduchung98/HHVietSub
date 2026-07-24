@@ -182,9 +182,15 @@ class Worker:
         if not root.is_dir():
             return []
         result: list[dict[str, str]] = []
-        for child in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if child.is_dir():
-                result.append({"name": child.name, "folder": child.name, "path": str(child)})
+        projects: list[tuple[float, Path]] = []
+        for child in root.iterdir():
+            try:
+                if child.is_dir() and (child / "draft_content.json").is_file():
+                    projects.append((child.stat().st_mtime, child))
+            except OSError:
+                continue
+        for _modified_at, child in sorted(projects, key=lambda item: item[0], reverse=True):
+            result.append({"name": child.name, "folder": child.name, "path": str(child)})
         return result[:100]
 
     def voice_create(self, params: dict[str, Any]) -> dict[str, Any]:
