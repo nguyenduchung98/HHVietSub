@@ -8,3 +8,4 @@
   color: #bd4056;
   font-weight: 700;
 }
+.lite-shell{grid-template-columns:1fr!important}.lite-shell .topbar{grid-template-columns:260px 1fr auto}.lite-shell .workspace{padding-top:20px}.lite-shell .nav-pills button{font-size:11px}.lite-shell .brand strong{color:#25304b}

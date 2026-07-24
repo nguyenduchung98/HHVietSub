@@ -24,11 +24,8 @@ type ApiVoice = { id: string; name: string; previewUrl?: string; language?: stri
 const cleanUnicode = (value: string) => new TextDecoder().decode(new TextEncoder().encode(value));
 
 const nav: { id: Page; label: string; icon: typeof Sparkles }[] = [
-  { id: 'studio', label: 'Phòng thu', icon: AudioLines },
-  { id: 'translate', label: 'Dịch phụ đề', icon: Languages },
-  { id: 'srt', label: 'Tạo từ SRT', icon: FileText },
-  { id: 'capcut', label: 'Dự án CapCut', icon: Clapperboard },
-  { id: 'settings', label: 'Cấu hình', icon: Settings2 },
+  { id: 'srt', label: 'Tạo voice SRT', icon: FileText },
+  { id: 'capcut', label: 'Đồng bộ & CapCut', icon: Clapperboard },
 ];
 
 const sampleVoices: Voice[] = [
@@ -38,42 +35,37 @@ const sampleVoices: Voice[] = [
 ];
 
 export function App() {
-  const [page, setPage] = useState<Page>('studio');
+  const [page, setPage] = useState<Page>('srt');
   const [online, setOnline] = useState(false);
-  const [voices, setVoices] = useState<Voice[]>(sampleVoices);
+  const [voices] = useState<Voice[]>([]);
   const [query, setQuery] = useState('');
   const [selectedVoice, setSelectedVoice] = useState('ban-mai');
   const [text, setText] = useState('Dich CapCut Studio giúp bạn biến phụ đề thành giọng nói và đồng bộ trực tiếp với dự án CapCut.');
   const [voiceModal, setVoiceModal] = useState(false);
   const [studioHistory, setStudioHistory] = useState<StudioResult[]>([]);
   const [srtDraft, setSrtDraft] = useState<SrtDraft | null>(null);
-  const loadVoices = () => window.desktop?.request<Voice[]>('voice.list').then(setVoices).catch(() => undefined);
+  const loadVoices = () => Promise.resolve();
   const loadStudioHistory = () => window.desktop?.request<StudioResult[]>('studio.history').then(setStudioHistory).catch(() => undefined);
 
   useEffect(() => {
     if (!window.desktop) return;
     window.desktop.request<{ online: boolean }>('system.ping').then((v) => setOnline(v.online)).catch(() => setOnline(false));
-    loadVoices();
-    loadStudioHistory();
     return window.desktop.onBackendEvent((raw) => {
       const event = raw as { event?: string; data?: { online?: boolean } };
       if (event.event === 'backend.state') setOnline(Boolean(event.data?.online));
     });
   }, []);
-  useEffect(() => { if (page === 'studio' || page === 'srt') loadVoices(); }, [page]);
 
   const filteredVoices = useMemo(() => voices.filter((voice) => voice.name.toLowerCase().includes(query.toLowerCase())), [voices, query]);
-  const pageLabel = nav.find((item) => item.id === page)?.label ?? 'Phòng thu';
-
-  const focusedWorkspace = page === 'translate' || page === 'srt' || page === 'capcut';
-  return <div className={`app-shell ${focusedWorkspace ? 'focused-workspace' : ''}`}>
+  const focusedWorkspace = true;
+  return <div className="app-shell focused-workspace lite-shell">
     <header className="topbar">
-      <div className="brand"><div className="brand-mark"><AudioLines size={23} /></div><div><strong>Dich CapCut</strong><span>AI LOCAL STUDIO</span></div></div>
+      <div className="brand"><div className="brand-mark"><AudioLines size={23} /></div><div><strong>HHVietSub Lite</strong><span>CAPCUT VOICE & SYNC</span></div></div>
       <nav className="nav-pills">{nav.map((item) => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => setPage(item.id)}><item.icon size={15} />{item.label}</button>)}</nav>
-      <div className="top-actions"><span className={`backend-state ${online ? 'online' : ''}`}><i />{online ? 'Backend sẵn sàng' : 'Chế độ xem trước'}</span><button className="icon-button" title="Làm mới thư viện giọng" onClick={loadVoices}><RefreshCw size={17} /></button><button className="icon-button"><CircleHelp size={18} /></button><div className="avatar">DC</div></div>
+      <div className="top-actions"><span className={`backend-state ${online ? 'online' : ''}`}><i />{online ? 'Backend sẵn sàng' : 'Backend chưa sẵn sàng'}</span><div className="avatar">LT</div></div>
     </header>
 
-    {!focusedWorkspace && <aside className="sidebar">
+    {false && <aside className="sidebar">
       <div className="eyebrow">THƯ VIỆN GIỌNG</div><div className="side-title"><h2>Giọng của bạn</h2><button title="Thêm giọng" onClick={() => setVoiceModal(true)}>+</button></div>
       <label className="search"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Tìm kiếm giọng" /></label>
       <div className="section-caption">GIỌNG OMNIVOICE</div>
@@ -82,25 +74,15 @@ export function App() {
     </aside>}
 
     <main className="workspace">
-      <div style={{ display: page === 'studio' ? 'block' : 'none' }}>
-        <Studio voices={voices} selectedVoice={selectedVoice} setSelectedVoice={setSelectedVoice} text={text} setText={setText} onHistoryChange={loadStudioHistory} />
-      </div>
-      <div style={{ display: page === 'translate' ? 'block' : 'none' }}>
-        <TranslatePage onSendToSrt={(draft) => { setSrtDraft(draft); setPage('srt'); }} />
-      </div>
       <div style={{ display: page === 'srt' ? 'block' : 'none' }}>
         <SrtVoicePage voices={voices} initialDraft={srtDraft} />
       </div>
       <div style={{ display: page === 'capcut' ? 'block' : 'none' }}>
         <CapCutProjectPage />
       </div>
-      <div style={{ display: page === 'settings' ? 'block' : 'none' }}>
-        <VoiceBackendSettings />
-      </div>
     </main>
 
-    {!focusedWorkspace && <GenerationHistoryPanel history={studioHistory} refresh={loadStudioHistory} />}
-    {voiceModal && <VoiceModal onClose={() => setVoiceModal(false)} onCreated={async (voice) => { await loadVoices(); setSelectedVoice(voice.id); setPage('studio'); setVoiceModal(false); }} />}
+    {false && <GenerationHistoryPanel history={studioHistory} refresh={loadStudioHistory} />}
   </div>;
 }
 
@@ -333,7 +315,7 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
 }
 
 function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft: SrtDraft | null }) {
-  const [engine, setEngine] = useState<'omnivoice' | 'vieneu' | 'ai33' | 'aimax' | 'capcut'>('omnivoice');
+  const [engine, setEngine] = useState<'omnivoice' | 'vieneu' | 'ai33' | 'aimax' | 'capcut'>('capcut');
   const [apiProvider, setApiProvider] = useState('minimax');
   const [apiModel, setApiModel] = useState('speech-2.8-hd');
   const [apiVoiceId, setApiVoiceId] = useState('');
@@ -410,7 +392,6 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     } catch(error) { setMessage(`Không thể nhập từ điển: ${error instanceof Error?error.message:String(error)}`); }
   };
   useEffect(() => { if (initialDraft) { setDraft(initialDraft); setMessage(`Đã nhận ${initialDraft.rows.length} câu từ tab Dịch.`); } }, [initialDraft]);
-  useEffect(() => { window.desktop?.request<{id:string;name:string}[]>('voice.languages').then((items)=>{if(items?.length)setOmniLanguages(items);}).catch(()=>undefined); }, []);
   useEffect(() => { if (!voiceId && voices.length) setVoiceId(voices.find((voice) => voice.ready)?.id || ''); }, [voices, voiceId]);
   useEffect(() => window.desktop?.onBackendEvent((raw) => {
     const packet = raw as { event?: string; data?: { event?: string; status?: string; message?: string; device?: string; done?: number; total?: number; id?: number; attempt?: number; item?: SrtVoiceRow; jobId?: string; state?: typeof jobState } | string };
@@ -623,7 +604,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     <div className="saved-job-compact"><button type="button" disabled={running} onClick={()=>setJobPickerOpen(true)}><FolderOpen size={15}/> Job đã lưu <b>{savedJobs.length}</b></button></div>
     <section className="srt-voice-config">
       <label><small>FILE ĐẦU VÀO</small><strong>{draft?.name || 'Chưa chọn SRT'}</strong><span>{draft ? `${draft.rows.length} câu phụ đề` : 'Có thể nhận trực tiếp từ tab Dịch'}</span></label>
-      <label><small>MÔ HÌNH TẠO GIỌNG</small><select value={engine} onChange={(e) => {setEngine(e.target.value as typeof engine);setApiVoiceId('');setApiVoices([]);}}><option value="omnivoice">OmniVoice · Local</option><option value="vieneu">VieNeu-TTS · Local GPU</option><option value="capcut">CapCut TTS · Backend nội bộ</option><option value="ai33">AI33 API</option><option value="aimax">AIMax API</option></select></label>
+      <label><small>MÔ HÌNH TẠO GIỌNG</small><select value={engine} onChange={(e) => {setEngine(e.target.value as typeof engine);setApiVoiceId('');setApiVoices([]);}}><option value="capcut">CapCut TTS · Lite</option></select><span>Hai nguồn: backend nội bộ + Hugging Face Space</span></label>
       {engine === 'omnivoice' ? <><label><small>GIỌNG OMNIVOICE</small><select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>{voices.filter((voice) => voice.ready).map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></label><label><small>NGÔN NGỮ PHỤ ĐỀ</small><select value={omniLanguage} onChange={(e)=>setOmniLanguage(e.target.value)}>{omniLanguages.map((item)=><option key={item.id} value={item.id}>{item.name}{item.id !== 'auto' ? ` (${item.id})` : ''}</option>)}</select></label><label><small>STEP / GUIDANCE</small><div className="inline-numbers"><input type="number" min="4" max="64" value={steps} onChange={(e) => setSteps(Number(e.target.value))} /><input type="number" min="0.5" max="5" step="0.1" value={guidance} onChange={(e) => setGuidance(Number(e.target.value))} /></div></label></> : engine === 'vieneu' ? <><label><small>GIỌNG VIENEU v3 TURBO</small><select value={vieneuVoice} onChange={(e)=>setVieneuVoice(e.target.value)}>{['Ngọc Lan','Ngọc Linh','Trúc Ly','Mỹ Duyên','Xuân Vĩnh','Thái Sơn','Gia Bảo','Đức Trí','Trọng Hữu','Bình An'].map((name)=><option key={name}>{name}</option>)}</select><span>48 kHz · giọng tích hợp chính thức</span></label><label><small>BATCH GPU</small><input type="number" min="1" max="32" value={vieneuBatchSize} onChange={(e)=>setVieneuBatchSize(Math.min(32,Math.max(1,Number(e.target.value)||1)))}/><span>RTX 3060: khuyên dùng 8</span></label></> : engine === 'capcut' ? <><label className={!apiVoiceId?'voice-required':''}><small>GIỌNG CAPCUT SPACE</small><div className="voice-id-picker"><input value={apiVoices.find((voice)=>voice.id===apiVoiceId)?.name||''} readOnly placeholder={voiceLibraryLoading?'Đang tải thư viện giọng…':'Chưa chọn giọng'}/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div><span>{apiVoiceId?'Đã sẵn sàng tạo voice':'Bắt buộc chọn giọng trước khi chạy'}</span></label><label><small>DỊCH VỤ</small><strong>tony2k · AI Voice Studio</strong><span>CapCut TTS từ Hugging Face Space · không cần API key</span></label></> : <><label><small>VOICE ID</small><div className="voice-id-picker"><input value={apiVoiceId} onChange={(e) => setApiVoiceId(e.target.value)} placeholder="Chọn trong thư viện hoặc nhập ID"/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div></label><label><small>NHÀ CUNG CẤP {engine === 'aimax' ? '/ MODEL' : ''}</small><div className="inline-numbers"><select value={apiProvider} onChange={(e) => { const p=e.target.value; setApiProvider(p); setApiVoices([]); setApiModel(p === 'minimax' ? 'speech-2.8-hd' : 'eleven_multilingual_v2'); }}><option value="minimax">MiniMax</option><option value="elevenlabs">ElevenLabs</option>{engine === 'ai33' && <><option value="edge">Edge</option><option value="kokoro">Kokoro</option><option value="vbee">Vbee</option><option value="fishaudio">Fish Audio</option><option value="clone">Giọng clone</option></>}</select>{engine === 'aimax' && <select value={apiModel} onChange={(e) => setApiModel(e.target.value)}>{apiProvider === 'minimax' ? <><option value="speech-2.8-hd">2.8 HD</option><option value="speech-2.8-turbo">2.8 Turbo</option><option value="speech-2.6-hd">2.6 HD</option><option value="speech-2.6-turbo">2.6 Turbo</option><option value="speech-02-hd">02 HD</option><option value="speech-02-turbo">02 Turbo</option></> : <><option value="eleven_v3">Eleven v3</option><option value="eleven_multilingual_v2">Multilingual v2</option><option value="eleven_flash_v2_5">Flash v2.5</option><option value="eleven_turbo_v2_5">Turbo v2.5</option></>}</select>}</div></label></>}
       <label><small>TỐC ĐỘ · {speed.toFixed(2)}×</small><input type="range" min="0.6" max="1.5" step="0.05" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} /></label>
       {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>NGÔN NGỮ PHỤ ĐỀ</small><select value={subtitleLanguage} onChange={(e)=>{setSubtitleLanguage(e.target.value);setApiVoices([]);setApiVoiceId('');}}><option value="auto">Tự động nhận diện</option><option value="Vietnamese">Tiếng Việt</option><option value="English">Tiếng Anh</option><option value="Spanish">Tiếng Tây Ban Nha</option><option value="French">Tiếng Pháp</option><option value="German">Tiếng Đức</option><option value="Portuguese">Tiếng Bồ Đào Nha</option><option value="Italian">Tiếng Ý</option><option value="Japanese">Tiếng Nhật</option><option value="Korean">Tiếng Hàn</option><option value="Chinese">Tiếng Trung</option><option value="Thai">Tiếng Thái</option><option value="Indonesian">Tiếng Indonesia</option><option value="Russian">Tiếng Nga</option><option value="Arabic">Tiếng Ả Rập</option></select><span>Dùng để lọc giọng và tạo đúng phát âm</span></label>}
@@ -647,6 +628,7 @@ function FfmpegAndCapCutTab() {
   const [voiceDir, setVoiceDir] = useState('');
   const [outputDir, setOutputDir] = useState('');
   const [encoder, setEncoder] = useState('auto');
+  const [renderProfile, setRenderProfile] = useState<'weak'|'balanced'|'fast'>('weak');
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
   const [changePitch, setChangePitch] = useState(false);
   const [videoVolumeDb, setVideoVolumeDb] = useState(-20);
@@ -714,7 +696,9 @@ function FfmpegAndCapCutTab() {
   const create = async () => {
     if(!window.desktop||!analysis?.ready||!outputDir||running)return;
     setRunning(true);setLogs([]);setResult(null);setProgressPercent(0);setMessage('Đang lập kế hoạch đồng bộ…');
-    try { const value=await window.desktop.request<{projectName:string;projectPath:string;template:string}>('ffmpeg.sync.create',{videoPath,srtPath,voiceDir,outputDir,projectName:jobName,chunkPieces:12,encoder,voiceSpeed,changePitch,videoVolumeDb,mergeAudio}); setResult(value);setProgressPercent(100);setMessage(`Hoàn tất: ${value.projectName}`); }
+    const profileEncoder = renderProfile === 'weak' ? 'x264' : encoder;
+    const chunkPieces = renderProfile === 'weak' ? 6 : renderProfile === 'balanced' ? 12 : 24;
+    try { const value=await window.desktop.request<{projectName:string;projectPath:string;template:string}>('ffmpeg.sync.create',{videoPath,srtPath,voiceDir,outputDir,projectName:jobName,chunkPieces,encoder:profileEncoder,voiceSpeed,changePitch,videoVolumeDb,mergeAudio,renderProfile}); setResult(value);setProgressPercent(100);setMessage(`Hoàn tất: ${value.projectName}`); }
     catch(error){setMessage(error instanceof Error?error.message:String(error));} finally{setRunning(false);}
   };
   return <div className="capcut-project-page" style={{ paddingTop: '10px' }}>
@@ -769,6 +753,7 @@ function FfmpegAndCapCutTab() {
       <div className="capcut-panel-card">
         <div className="panel-card-title"><Zap size={15}/> <span>CẤU HÌNH XUẤT</span></div>
         <label className={`merge-audio-toggle ${mergeAudio?'active':''}`}><input type="checkbox" checked={mergeAudio} onChange={(e)=>setMergeAudio(e.target.checked)}/><span><strong>{mergeAudio?'Có ghép video với audio':'Không ghép audio'}</strong><small>{mergeAudio?'Xuất thêm MP4 hoàn chỉnh có voice.':'Chỉ giữ 3 file: SRT, master voice và video-synced.mp4.'}</small></span></label>
+        <label><small>CẤU HÌNH THEO MÁY</small><select value={renderProfile} onChange={(e)=>setRenderProfile(e.target.value as typeof renderProfile)}><option value="weak">Máy yếu · CPU 4 luồng · ít RAM</option><option value="balanced">Cân bằng · GPU tự động</option><option value="fast">Máy mạnh · GPU · cache lớn</option></select></label>
         <div className="panel-card-grid-2">
           <label><small>TÊN KẾT QUẢ</small><input value={jobName} onChange={(e)=>setJobName(e.target.value)}/></label>
           <label><small>BỘ MÃ HÓA VIDEO</small><select value={encoder} onChange={(e)=>setEncoder(e.target.value)}><option value="auto">Tự động (GPU tốt nhất)</option><option value="nvenc">NVIDIA NVENC</option><option value="amf">AMD AMF</option><option value="qsv">Intel QSV</option><option value="x264">CPU (libx264)</option></select></label>

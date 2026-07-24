@@ -4,12 +4,10 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { BackendManager } from './backend-manager';
-import { GeminiCdpManager } from './gemini-cdp';
 import { AppSecrets, SecretStore } from './secret-store';
 
 let window: BrowserWindow | null = null;
 let backend: BackendManager | null = null;
-let gemini: GeminiCdpManager | null = null;
 
 const grantedFiles = new Set<string>();
 const grantedDirectories = new Set<string>();
@@ -36,18 +34,12 @@ const PATH_RESULT_KEYS = new Set([
 ]);
 
 const RENDERER_RPC_METHODS = new Set([
-  'system.ping', 'system.info',
-  'voice.list', 'voice.languages', 'voice.create',
+  'system.ping',
   'project.list',
-  'settings.get', 'settings.voice.save', 'settings.voice.test',
-  'settings.tts.get', 'settings.tts.save', 'settings.tts.test',
-  'models.list', 'models.download', 'models.delete',
-  'tts.voices.list', 'tts.voice.preview',
-  'subtitle.parse', 'subtitle.save', 'subtitle.translate', 'subtitle.translate.browser',
-  'studio.generate', 'studio.history', 'studio.history.delete',
+  'tts.voices.list',
+  'subtitle.parse',
   'srt.voice.generate', 'srt.voice.regenerate', 'srt.voice.control', 'srt.voice.latest', 'srt.voice.list', 'srt.voice.get',
-  'capcut.project.validate', 'capcut.project.validate_existing',
-  'capcut.project.create', 'capcut.project.sync', 'capcut.open',
+  'capcut.project.validate_existing', 'capcut.project.sync', 'capcut.open',
   'ffmpeg.sync.validate', 'ffmpeg.sync.create',
 ]);
 
@@ -90,8 +82,10 @@ const sanitizeFileDialogOptions = (value: unknown): Pick<OpenDialogOptions, 'fil
 
 // Chromium caches are machine-local and should not live beside persistent app
 // data in Roaming. A stale/locked cache there can leave the renderer blank.
-const sessionDataPath = path.join(process.env.LOCALAPPDATA || app.getPath('appData'), 'HHVietSub', 'SessionData');
+const liteDataRoot = path.join(process.env.LOCALAPPDATA || app.getPath('appData'), 'HHVietSub Lite');
+const sessionDataPath = path.join(liteDataRoot, 'SessionData');
 mkdirSync(sessionDataPath, { recursive: true });
+app.setPath('userData', liteDataRoot);
 app.setPath('sessionData', sessionDataPath);
 app.commandLine.appendSwitch('disk-cache-dir', path.join(sessionDataPath, 'Cache'));
 
@@ -105,7 +99,7 @@ const createWindow = async () => {
     minWidth: 1024,
     minHeight: 680,
     backgroundColor: '#f5f7ff',
-    title: 'HHVietSub Studio',
+    title: 'HHVietSub Lite',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -144,6 +138,8 @@ const createWindow = async () => {
   }
 };
 
+app.setName('HHVietSub Lite');
+
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   Menu.setApplicationMenu(null);
@@ -156,7 +152,6 @@ app.whenReady().then(async () => {
 
   const userDataPath = app.getPath('userData');
   backend = new BackendManager(userDataPath);
-  gemini = new GeminiCdpManager(path.join(userDataPath, 'gemini-profile'), sendEvent);
   backend.onEvent(sendEvent);
   await backend.start();
 
@@ -208,26 +203,6 @@ app.whenReady().then(async () => {
     }
     return result;
   });
-  ipcMain.handle('gemini:translate', async (event, params) => {
-    assertTrustedSender(event);
-    const result = await gemini?.translate(params);
-    if (result && Notification.isSupported()) {
-      new Notification({
-        title: 'HHVietSub',
-        body: `Đã dịch xong ${result.results.length} câu trong ${result.chunks} chunk.`,
-      }).show();
-    }
-    if (window && !window.isDestroyed()) {
-      window.show();
-      window.flashFrame(true);
-      setTimeout(() => { if (window && !window.isDestroyed()) window.flashFrame(false); }, 3000);
-    }
-    return result;
-  });
-  ipcMain.handle('gemini:open', (event, url: string) => { assertTrustedSender(event); return gemini?.open(url); });
-  ipcMain.handle('gemini:login', (event) => { assertTrustedSender(event); return gemini?.login(); });
-  ipcMain.handle('gemini:cancel', (event) => { assertTrustedSender(event); return gemini?.cancel(); });
-  ipcMain.handle('gemini:pause', (event, paused: boolean) => { assertTrustedSender(event); return gemini?.setPaused(Boolean(paused)); });
   ipcMain.handle('dialog:file', async (event, options: unknown) => {
     assertTrustedSender(event);
     const result = await dialog.showOpenDialog(window!, { properties: ['openFile'], ...sanitizeFileDialogOptions(options) });

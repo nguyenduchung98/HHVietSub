@@ -491,7 +491,7 @@ def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
     # Pieces are rendered sequentially, so a larger group no longer increases
     # filter RAM. Twelve pieces reduces concat/container overhead while keeping
     # cache checkpoints reasonably frequent.
-    effective_chunk_pieces = min(12, max(2, chunk_pieces))
+    effective_chunk_pieces = min(24, max(2, chunk_pieces))
     groups = [pieces[i:i + effective_chunk_pieces] for i in range(0, len(pieces), effective_chunk_pieces)]
     encoder = _encoder(ffmpeg, encoder_choice)
     chunk_paths: list[Path] = []

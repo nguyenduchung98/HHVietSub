@@ -27,12 +27,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.services.settings_service import SettingsService
-from backend.services.model_service import ModelService
 from backend.services.tts_api_service import TtsApiService
 from backend.services.srt_job_service import SrtJobService
 from backend.services.subtitle_service import SubtitleService
-from backend.services.gemini_translation_service import GeminiTranslationService
-from backend.services.voice_studio_service import VoiceStudioService
 from backend.rpc.errors import rpc_error
 
 
@@ -73,52 +70,21 @@ class Worker:
         self.user_data = user_data
         self.user_data.mkdir(parents=True, exist_ok=True)
         self.settings = SettingsService(self.user_data)
-        self.models = ModelService(APP_ROOT, emit)
         self.tts_api = TtsApiService(self.settings)
         self.srt_jobs = SrtJobService(self.user_data, emit)
         self.ffmpeg_sync_lock = threading.Lock()
-        self.gemini_translation = GeminiTranslationService(LEGACY_CAPCUT)
-        self.voice_studio = VoiceStudioService(
-            self.user_data, APP_ROOT, LEGACY_OMNIVOICE, self._voice_config, self._remote_generate
-        )
         self.routes: dict[str, Callable[[dict[str, Any]], Any]] = {
             "system.ping": self.ping,
-            "system.info": self.system_info,
-            "voice.list": self.voice_list,
-            "voice.languages": self.voice_languages,
-            "voice.create": self.voice_create,
             "project.list": self.project_list,
-            "settings.get": self.settings_get,
-            "settings.voice.save": self.voice_settings_save,
-            "settings.voice.test": self.voice_settings_test,
-            "settings.tts.get": self.tts_settings_get,
-            "settings.tts.save": self.tts_settings_save,
-            "settings.tts.test": self.tts_settings_test,
-            "settings.secrets.export": self.secrets_export,
-            "settings.secrets.set": self.secrets_set,
-            "models.list": self.models_list,
-            "models.download": self.models_download,
-            "models.delete": self.models_delete,
             "tts.voices.list": self.tts_voices_list,
-            "tts.voice.preview": self.tts_voice_preview,
             "subtitle.parse": self.subtitle_parse,
-            "subtitle.save": self.subtitle_save,
-            "subtitle.translate": self.subtitle_translate,
-            "subtitle.translate.browser": self.subtitle_translate_browser,
-            "gemini.open": self.gemini_open,
-            "gemini.login": self.gemini_login,
-            "studio.generate": self.studio_generate,
-            "studio.history": self.studio_history,
-            "studio.history.delete": self.studio_history_delete,
             "srt.voice.generate": self.srt_voice_generate,
             "srt.voice.regenerate": self.srt_voice_generate,
             "srt.voice.control": self.srt_voice_control,
             "srt.voice.latest": self.srt_voice_latest,
             "srt.voice.list": self.srt_voice_list,
             "srt.voice.get": self.srt_voice_get,
-            "capcut.project.validate": self.capcut_project_validate,
             "capcut.project.validate_existing": self.capcut_project_validate_existing,
-            "capcut.project.create": self.capcut_project_create,
             "capcut.project.sync": self.capcut_project_sync,
             "capcut.open": self.capcut_open,
             "ffmpeg.sync.validate": self.ffmpeg_sync_validate,
@@ -637,11 +603,13 @@ class Worker:
 
     def srt_voice_generate(self, params: dict[str, Any]) -> dict[str, Any]:
         entries = params.get("entries")
-        engine = str(params.get("engine", "omnivoice")).lower()
+        engine = str(params.get("engine", "capcut")).lower()
         voice_id = str(params.get("voiceId", "")).strip()
         if not isinstance(entries, list) or not entries:
             raise ValueError("Không có câu phụ đề để tạo giọng")
-        if engine in {"ai33", "aimax", "capcut"}:
+        if engine != "capcut":
+            raise ValueError("HHVietSub Lite only supports CapCut TTS")
+        if engine == "capcut":
             job_params = {**params, "jobId": str(params.get("jobId") or f"srt-{int(time.time() * 1000)}")}
             try:
                 return self._srt_api_generate(engine, job_params, entries)
@@ -1134,10 +1102,10 @@ def sanitize_json_value(value: Any) -> Any:
 def self_test() -> int:
     worker = Worker(ROOT / ".dev-user-data")
     assert worker.handle({"id": "1", "method": "system.ping", "params": {}})["result"]["online"]
-    voices = worker.voice_list({})
-    assert isinstance(voices, list)
+    voices = worker.tts_voices_list({"engine": "capcut", "language": "vi"})
+    assert isinstance(voices, dict)
     assert "\udc8d" not in sanitize_json_value("lỗi\udc8dunicode")
-    print(json.dumps({"ok": True, "voices": len(voices), "projects": len(worker.project_list({}))}, ensure_ascii=False))
+    print(json.dumps({"ok": True, "voices": len(voices.get("voices", [])), "projects": len(worker.project_list({}))}, ensure_ascii=False))
     return 0
 
 

@@ -1,8 +1,8 @@
 {
-  "name": "dich-capcut-studio",
+  "name": "hhvietsub-lite",
   "version": "0.1.0",
   "packageManager": "npm@10.0.0",
-  "description": "HHVietSub AI Subtitle & Voice Studio",
+  "description": "HHVietSub Lite - CapCut TTS and low-resource sync",
   "author": "HHVietSub Team",
   "private": true,
   "main": "dist-electron/main.js",
@@ -20,8 +20,8 @@
     "test": "node scripts/test.mjs"
   },
   "build": {
-    "appId": "com.hhvietsub.studio",
-    "productName": "HHVietSub Studio",
+    "appId": "com.hhvietsub.lite",
+    "productName": "HHVietSub Lite",
     "directories": {
       "output": "dist-package"
     },
@@ -38,27 +38,25 @@
           "**/*",
           "!tests/**/*",
           "!**/__pycache__/**/*",
-          "!**/*.pyc"
+          "!**/*.pyc",
+          "!engines/omnivoice_*.py",
+          "!engines/vieneu_*.py",
+          "!engines/download_model.py",
+          "!services/model_service.py",
+          "!services/gemini_translation_service.py",
+          "!services/voice_studio_service.py"
         ]
       },
       {
         "from": "vendor",
         "to": "vendor",
         "filter": [
-          "capcut-cli/dist/**/*",
-          "capcut-cli/templates/**/*",
-          "capcut-cli/package.json",
-          "capcut-cli/LICENSE",
           "ffprobe.exe"
         ]
       },
       {
         "from": "setup_ffmpeg.bat",
         "to": "setup_ffmpeg.bat"
-      },
-      {
-        "from": "setup_vieneu_backend.bat",
-        "to": "setup_vieneu_backend.bat"
       }
     ],
     "win": {
