@@ -83,7 +83,7 @@
   height: calc(100vh - 120px);
   display: grid;
   grid-template-columns: minmax(340px, 420px) minmax(560px, 1fr);
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--space-4) var(--space-6);
 }
@@ -93,11 +93,9 @@
 .srt-voice-page > .srt-voice-config { grid-column: 1; grid-row: 3; }
 .srt-voice-page > .srt-voice-table { grid-column: 2; grid-row: 2 / 4; align-self: stretch; }
 .srt-voice-page > .srt-run-stats { grid-column: 2; grid-row: 4; align-self: center; }
-.srt-voice-page > .srt-voice-footer { grid-column: 2; grid-row: 5; }
 
 .srt-voice-page:has(> .srt-queue-panel) > .srt-queue-panel { grid-column: 2; grid-row: 2; }
 .srt-voice-page:has(> .srt-queue-panel) > .srt-voice-table { grid-row: 3; }
-.srt-voice-page:has(> .srt-queue-panel) > .srt-voice-footer { grid-row: 5; }
 
 .srt-voice-page > .lite-engine-switch,
 .srt-voice-page > .srt-voice-config {
@@ -115,8 +113,7 @@
 }
 
 .srt-voice-page > .srt-run-stats,
-.srt-voice-page > .srt-voice-table,
-.srt-voice-page > .srt-voice-footer { margin-top: 0; }
+.srt-voice-page > .srt-voice-table { margin-top: 0; }
 .srt-voice-page > .srt-voice-table {
   min-width: 0;
   min-height: 0;
@@ -132,7 +129,6 @@
   z-index: 4;
   box-shadow: 0 1px 0 var(--border);
 }
-.srt-voice-page > .srt-voice-footer { font-size: 13px; }
 
 .srt-voice-page > .srt-sticky-actions {
   grid-column: 1;
