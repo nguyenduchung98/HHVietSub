@@ -81,6 +81,7 @@
   max-width: 1480px;
   min-height: 620px;
   height: calc(100vh - 120px);
+  padding-bottom: 0;
   display: grid;
   grid-template-columns: minmax(340px, 420px) minmax(560px, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr) auto;
