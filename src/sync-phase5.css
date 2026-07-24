@@ -136,3 +136,130 @@
   .sync-sticky-cta small { display: none; }
   .sync-sticky-cta .primary { min-width: 190px; }
 }
+
+/* Phase 7: shared two-column sync workspace */
+.sync-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 2fr) minmax(500px, 3fr);
+  gap: 24px;
+  align-items: stretch;
+  min-height: 560px;
+}
+
+.sync-input-panel,
+.sync-progress,
+.sync-status-run {
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.sync-input-panel {
+  padding: 16px;
+}
+
+.sync-input-panel > header {
+  display: grid;
+  gap: 4px;
+  padding: 0 4px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sync-input-panel > header strong { font-size: 15px; }
+.sync-input-panel > header small { color: var(--text-muted); font-size: 10px; }
+.sync-input-list { display: grid; gap: 10px; padding-top: 16px; }
+
+.sync-input-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px 36px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 82px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--surface);
+  text-align: left;
+  box-sizing: border-box;
+}
+
+button.sync-input-row { cursor: pointer; transition: border-color .18s ease, background .18s ease; }
+button.sync-input-row:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 3%, var(--surface)); }
+.sync-input-number { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); font-size: 10px; font-weight: 850; }
+.sync-input-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; color: var(--accent); background: var(--surface-muted); }
+.sync-input-copy { display: grid; gap: 4px; min-width: 0; }
+.sync-input-copy small { color: var(--text-muted); font-size: 8px; font-weight: 800; }
+.sync-input-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sync-input-copy em { overflow: hidden; color: var(--text-muted); font-size: 9px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.sync-input-copy select { width: 100%; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface-muted); font-size: 11px; font-weight: 700; outline: 0; }
+.sync-input-badge { max-width: 112px; overflow: hidden; padding: 5px 8px; border-radius: 999px; color: var(--text-muted); background: var(--surface-muted); font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.sync-input-badge.selected { color: var(--success); background: color-mix(in srgb, var(--success) 10%, var(--surface)); }
+
+.sync-right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sync-right-column .capcut-settings-row { grid-template-columns: 1fr 1fr; margin: 0; }
+.sync-right-column .capcut-panel-card { padding: 16px; }
+
+.sync-progress { padding: 16px; }
+.sync-progress-label { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.sync-progress-label strong { font-size: 12px; }
+.sync-progress-label span { color: var(--accent); font-size: 11px; font-weight: 850; }
+.sync-progress-track { height: 9px; overflow: hidden; border-radius: 999px; background: var(--surface-muted); }
+.sync-progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#7c5cfc,#9d7bff); transition: width .3s ease; }
+.sync-progress.complete .sync-progress-label span { color: #22c55e; }
+.sync-progress.complete .sync-progress-track i { background: #22c55e; }
+.sync-progress.error .sync-progress-label { color: #ef4444; }
+.sync-progress.error .sync-progress-label span { color: #ef4444; }
+.sync-progress.error .sync-progress-track i { background: #ef4444; }
+
+.sync-status-run {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: auto;
+  padding: 16px;
+  z-index: 12;
+}
+
+.sync-input-check { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; color: #d08a35; font-size: 10px; font-weight: 800; }
+.sync-input-check.ready { color: #22c55e; }
+.sync-status-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 12px; }
+.sync-status-heading > div { display: grid; gap: 4px; min-width: 0; }
+.sync-status-heading strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sync-status-heading small { color: var(--text-muted); font-size: 9px; }
+.sync-status-heading > span { flex: none; padding: 5px 8px; border-radius: 7px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); font-size: 8px; font-weight: 850; }
+.sync-status-run .capcut-log { height: 92px; margin: 0 -16px 14px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); box-sizing: border-box; }
+.sync-status-run footer { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; color: var(--success); }
+.sync-status-run footer > div { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.sync-status-run footer span { display: grid; min-width: 0; }
+.sync-status-run footer strong { color: var(--text); font-size: 11px; }
+.sync-status-run footer small { overflow: hidden; color: var(--text-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.sync-status-run footer button { display: flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); background: var(--surface-muted); font-size: 9px; font-weight: 800; cursor: pointer; }
+.sync-main-cta { position: static; width: 100%; min-height: 44px; justify-content: center; box-shadow: none; }
+
+@media (max-width: 1023px) {
+  body { min-width: 0; }
+  .sync-workspace-grid { grid-template-columns: 1fr; min-height: 0; }
+  .sync-right-column .capcut-settings-row { grid-template-columns: 1fr; }
+  .sync-status-run { position: static; }
+}
+
+@media (max-width: 640px) {
+  .sync-input-panel,
+  .sync-progress,
+  .sync-status-run { padding: 14px; }
+  .sync-input-row { grid-template-columns: 24px 34px minmax(0,1fr); }
+  .sync-input-badge { grid-column: 3; justify-self: start; max-width: 100%; }
+  .sync-status-run .capcut-log { margin-left: -14px; margin-right: -14px; }
+}
