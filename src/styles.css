@@ -9,3 +9,14 @@
   font-weight: 700;
 }
 .lite-shell{grid-template-columns:1fr!important}.lite-shell .topbar{grid-template-columns:260px 1fr auto}.lite-shell .workspace{padding-top:20px}.lite-shell .nav-pills button{font-size:11px}.lite-shell .brand strong{color:#25304b}
+:root{--lite-ink:#172033;--lite-muted:#69758d;--lite-line:#e3e7ef;--lite-surface:#fff;--lite-soft:#f6f7fb;--lite-primary:#6753d9;--lite-primary-dark:#5541c1;--lite-success:#21876b}
+body{background:#f5f6fa;color:var(--lite-ink)}
+.lite-shell{background:linear-gradient(180deg,#f8f9fc 0,#f4f5f9 100%)!important}
+.lite-shell .topbar{height:72px;position:sticky;top:0;z-index:40;padding:0 28px;border-bottom:1px solid var(--lite-line);box-shadow:0 1px 0 rgba(24,32,51,.02)}
+.lite-shell .brand-mark{width:38px;height:38px;border-radius:11px;background:linear-gradient(145deg,#715ee0,#5844c5);box-shadow:0 8px 18px rgba(92,72,199,.22)}
+.lite-shell .brand strong{font-size:15px;letter-spacing:-.01em}.lite-shell .brand span{font-size:8px;letter-spacing:.12em}
+.lite-shell .nav-pills{padding:4px;background:#f0f1f5;border:1px solid #e8eaf0;border-radius:12px}
+.lite-shell .nav-pills button{height:36px;padding:0 14px;border-radius:9px;color:#667187;font-weight:700}
+.lite-shell .nav-pills button.active{color:var(--lite-primary);box-shadow:0 2px 8px rgba(30,37,55,.08)}
+.lite-shell .avatar{width:34px;height:34px;border-radius:10px;background:#e9f6f1;color:#247b66}
+.lite-shell .workspace{padding:0;background:transparent}
