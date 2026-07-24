@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a reproducible problem in HHVietSub
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove API keys, private subtitles, personal paths, and private media from logs and screenshots.
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - HHVietSub Lite
+        - HHVietSub full
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: Describe what happened and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open...
+        2. Select...
+        3. Click...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Windows version, CPU/GPU, RAM, FFmpeg version, and selected engine.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed secrets, private subtitles, and personal paths.
+          required: true
+        - label: I searched existing issues.
+          required: true

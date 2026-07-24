@@ -1,29 +1,24 @@
 # HHVietSub Lite
 
-Phiên bản tinh gọn dành cho máy yếu, phát triển độc lập trên nhánh
-`codex/lite`.
+HHVietSub Lite is the low-resource edition maintained on the `codex/lite`
+branch. See the main [README](README.md) for setup, validation, privacy, and
+contribution instructions.
 
-## Chức năng giữ lại
+## Included
 
-- CapCut TTS, xử lý một file hoặc hàng chờ thư mục SRT.
-- Từ điển phát âm: thêm, sửa, xóa, nhập và xuất.
-- Đồng bộ video bằng FFmpeg.
-- Chỉnh sửa dự án CapCut đã có.
+- CapCut TTS, AI33, and AIMax SRT voice generation
+- Single-file and folder-based SRT queues
+- Pronunciation dictionary import and export
+- FFmpeg video synchronization
+- Safe updates to existing CapCut projects
+- Rendering profiles for weak, balanced, and fast machines
 
-## Cấu hình đồng bộ
+## Excluded from Lite
 
-- **Máy yếu:** CPU x264, nhóm 6 cụm, ưu tiên ít RAM và ổn định.
-- **Cân bằng:** tự chọn GPU, nhóm 12 cụm.
-- **Máy mạnh:** tự chọn GPU, nhóm 24 cụm để tăng tốc.
+- OmniVoice and VieNeu local GPU engines
+- Gemini and Chrome translation automation
+- Bundled AI models, GPU runtimes, and heavyweight Python libraries
+- New CapCut project creation
 
-FFmpeg xử lý tuần tự từng đoạn để tránh tăng RAM đột biến. Nếu một đoạn không
-ổn định, tiến trình chuyển sang render an toàn và giữ các đoạn đã hoàn tất.
-
-## Khác biệt với bản đầy đủ
-
-- Không OmniVoice hoặc VieNeu local GPU.
-- Không Gemini/Chrome automation.
-- Không tải hoặc đóng gói model AI, runtime GPU và thư viện Python nặng.
-- Không tạo dự án CapCut mới; chỉ chỉnh sửa dự án đã có.
-- App ID: `com.hhvietsub.lite`.
-- Dữ liệu và cache: `%LOCALAPPDATA%\HHVietSub Lite`.
+The Lite application ID is `com.hhvietsub.lite`, and its local user data is
+stored under `%LOCALAPPDATA%\HHVietSub Lite`.

@@ -4,6 +4,23 @@
   "packageManager": "npm@10.0.0",
   "description": "HHVietSub Lite - CapCut TTS and low-resource sync",
   "author": "HHVietSub Team",
+  "license": "MIT",
+  "homepage": "https://github.com/nguyenduchung98/HHVietSub#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nguyenduchung98/HHVietSub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nguyenduchung98/HHVietSub/issues"
+  },
+  "keywords": [
+    "capcut",
+    "ffmpeg",
+    "srt",
+    "subtitles",
+    "text-to-speech",
+    "vietnamese"
+  ],
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
