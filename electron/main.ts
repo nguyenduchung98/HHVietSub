@@ -4,7 +4,6 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { BackendManager } from './backend-manager';
-import { AppSecrets, SecretStore } from './secret-store';
 
 let window: BrowserWindow | null = null;
 let backend: BackendManager | null = null;
@@ -155,30 +154,11 @@ app.whenReady().then(async () => {
   backend.onEvent(sendEvent);
   await backend.start();
 
-  const secretStore = new SecretStore(userDataPath);
-  const legacySecrets = await backend.request('settings.secrets.export', {}) as Partial<AppSecrets>;
-  await secretStore.mergeMissing(legacySecrets);
-  await backend.request('settings.secrets.set', await secretStore.getAll());
 
   ipcMain.handle('backend:request', async (event, method: string, params: unknown) => {
     assertTrustedSender(event);
     if (typeof method !== 'string' || !RENDERER_RPC_METHODS.has(method)) throw new Error('RPC không được phép gọi từ giao diện');
     const fields = params && typeof params === 'object' ? params as Record<string, unknown> : {};
-    const secrets: Partial<AppSecrets> = {};
-    if ((method === 'settings.voice.save' || method === 'settings.voice.test') && String(fields.token || '').trim()) {
-      secrets.voiceToken = String(fields.token).trim();
-    }
-    if ((method === 'settings.tts.save' || method === 'settings.tts.test') && String(fields.ai33Key || '').trim()) {
-      secrets.ai33Key = String(fields.ai33Key).trim();
-    }
-    if ((method === 'settings.tts.save' || method === 'settings.tts.test') && String(fields.aimaxKey || '').trim()) {
-      secrets.aimaxKey = String(fields.aimaxKey).trim();
-    }
-    if (method === 'settings.tts.test' && String(fields.key || '').trim()) {
-      if (fields.provider === 'ai33') secrets.ai33Key = String(fields.key).trim();
-      if (fields.provider === 'aimax') secrets.aimaxKey = String(fields.key).trim();
-    }
-    if (Object.keys(secrets).length) await secretStore.merge(secrets);
     const result = await backend?.request(method, fields);
     grantResultPaths(result);
     const isSrtGeneration = method === 'srt.voice.generate' || method === 'srt.voice.regenerate';

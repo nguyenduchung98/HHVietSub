@@ -82,7 +82,7 @@ export class BackendManager {
     return new Promise((resolve, reject) => {
       const timeoutMs = method === 'ffmpeg.sync.create'
         ? 12 * 60 * 60_000
-        : method === 'studio.generate' || method === 'voice.create' || method === 'subtitle.translate.browser' || method.startsWith('srt.voice.') || method === 'capcut.project.create' || method === 'capcut.project.sync'
+        : method.startsWith('srt.voice.') || method === 'capcut.project.sync'
           ? 30 * 60_000
           : 30_000;
       const timeout = setTimeout(() => {
