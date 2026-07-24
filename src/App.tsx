@@ -353,6 +353,11 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   const [queueRunning, setQueueRunning] = useState(false);
   const [capcutBackend, setCapcutBackend] = useState<'direct'|'space'|'hybrid'>('hybrid');
   const [dictionaryOpen, setDictionaryOpen] = useState(false);
+  const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
+  const [ai33Key, setAi33Key] = useState('');
+  const [aimaxKey, setAimaxKey] = useState('');
+  const [apiKeyStatus, setApiKeyStatus] = useState({ ai33KeyCount: 0, aimaxKeyCount: 0 });
+  const [apiKeyBusy, setApiKeyBusy] = useState(false);
   const [pronunciationDictionary, setPronunciationDictionary] = useState<{id:string;source:string;target:string}[]>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('hhvietsub.pronunciationDictionary') || '[]');
@@ -365,6 +370,43 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   const saveDictionary = (items: {id:string;source:string;target:string}[]) => {
     setPronunciationDictionary(items);
     localStorage.setItem('hhvietsub.pronunciationDictionary', JSON.stringify(items));
+  };
+  const loadApiKeyStatus = async () => {
+    if (!window.desktop) return;
+    const value = await window.desktop.request<{ai33KeyCount:number;aimaxKeyCount:number}>('settings.tts.get');
+    setApiKeyStatus(value);
+  };
+  const saveApiKeys = async () => {
+    if (!window.desktop) return;
+    setApiKeyBusy(true);
+    try {
+      const value = await window.desktop.request<{ai33KeyCount:number;aimaxKeyCount:number}>('settings.tts.save', {
+        ai33Key: ai33Key.trim(),
+        aimaxKey: aimaxKey.trim(),
+      });
+      setApiKeyStatus(value);
+      setAi33Key('');
+      setAimaxKey('');
+      setMessage('Đã lưu API key bằng kho mã hóa an toàn của Windows.');
+    } catch (error) {
+      setMessage(`Không thể lưu API key: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setApiKeyBusy(false);
+    }
+  };
+  const testApiKey = async (provider: 'ai33'|'aimax') => {
+    if (!window.desktop) return;
+    setApiKeyBusy(true);
+    try {
+      const key = provider === 'ai33' ? ai33Key.trim() : aimaxKey.trim();
+      const value = await window.desktop.request<{ok:boolean;valid:number;total:number}>('settings.tts.test', { provider, key });
+      setMessage(`${provider.toUpperCase()}: ${value.valid}/${value.total} key hoạt động.`);
+      await loadApiKeyStatus();
+    } catch (error) {
+      setMessage(`Kiểm tra ${provider.toUpperCase()} thất bại: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setApiKeyBusy(false);
+    }
   };
   const replacePronunciation = (text: string) => pronunciationDictionary.reduce((current, item) => {
     const source = item.source.trim();
@@ -393,6 +435,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   };
   useEffect(() => { if (initialDraft) { setDraft(initialDraft); setMessage(`Đã nhận ${initialDraft.rows.length} câu từ tab Dịch.`); } }, [initialDraft]);
   useEffect(() => { if (!voiceId && voices.length) setVoiceId(voices.find((voice) => voice.ready)?.id || ''); }, [voices, voiceId]);
+  useEffect(() => { void loadApiKeyStatus().catch(() => undefined); }, []);
   useEffect(() => window.desktop?.onBackendEvent((raw) => {
     const packet = raw as { event?: string; data?: { event?: string; status?: string; message?: string; device?: string; done?: number; total?: number; id?: number; attempt?: number; item?: SrtVoiceRow; jobId?: string; state?: typeof jobState } | string };
     if (packet.event === 'srt.voice.log' && typeof packet.data === 'string') {
@@ -602,6 +645,18 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     {queue.length>0&&<section className="srt-queue-panel"><header><div><strong>HÀNG CHỜ TẠO VOICE</strong><small>{queue.filter((item)=>item.status==='completed').length}/{queue.length} file hoàn thành</small></div><button disabled={running} onClick={()=>setQueue((current)=>current.filter((item)=>item.status!=='completed'))}>Dọn file đã xong</button><button disabled={running} onClick={()=>{setQueue([]);setMessage('Đã xóa hàng chờ.');}}>Xóa hàng chờ</button></header><div className="srt-queue-list">{queue.map((item,index)=><article key={item.id} className={item.status} onClick={()=>{if(running)return;setDraft(item.draft);setOutputDir(item.outputDir||'');setProgress({done:item.done,total:item.total});}}><b>{index+1}</b><div><strong>{item.draft.name}</strong><small>{item.done}/{item.total} câu{item.error?` · ${item.error}`:''}</small></div><span>{item.status==='waiting'?'Đang chờ':item.status==='running'?'Đang tạo':item.status==='completed'?'Hoàn thành':item.status==='cancelled'?'Đã dừng':'Có lỗi'}</span><button disabled={running} title="Xóa khỏi hàng chờ" onClick={(event)=>{event.stopPropagation();setQueue((current)=>current.filter((queued)=>queued.id!==item.id));}}><X size={14}/></button></article>)}</div></section>}
     {engine==='capcut'&&<section className="capcut-voice-tools"><label><small>NGUỒN CAPCUT TTS</small><select value={capcutBackend} onChange={(e)=>setCapcutBackend(e.target.value as typeof capcutBackend)}><option value="hybrid">Kết hợp nội bộ + Space (nhanh nhất)</option><option value="direct">Chỉ backend nội bộ</option><option value="space">Chỉ Hugging Face Space</option></select><span>{capcutBackend==='hybrid'?'Chia câu chẵn/lẻ cho hai nguồn; mỗi nguồn cách request 10 giây.':capcutBackend==='direct'?'Gọi trực tiếp CapCut API.':'Dùng tony2k/ai-voice-studio như trước.'}</span></label><button type="button" onClick={()=>setDictionaryOpen(true)}><FileText size={15}/> Từ điển phát âm <b>{pronunciationDictionary.length}</b></button></section>}
     <div className="saved-job-compact"><button type="button" disabled={running} onClick={()=>setJobPickerOpen(true)}><FolderOpen size={15}/> Job đã lưu <b>{savedJobs.length}</b></button></div>
+    <section className="lite-engine-switch">
+      <div>
+        <small>DỊCH VỤ TẠO GIỌNG</small>
+        <button className={engine==='capcut'?'active':''} onClick={()=>{setEngine('capcut');setApiVoiceId('');setApiVoices([]);}}>CapCut TTS</button>
+        <button className={engine==='ai33'?'active':''} onClick={()=>{setEngine('ai33');setApiVoiceId('');setApiVoices([]);}}>AI33 API</button>
+        <button className={engine==='aimax'?'active':''} onClick={()=>{setEngine('aimax');setApiVoiceId('');setApiVoices([]);}}>AIMax API</button>
+      </div>
+      <button type="button" onClick={()=>{setApiSettingsOpen(true);void loadApiKeyStatus();}}>
+        <Settings2 size={15}/> API key
+        <b>{apiKeyStatus.ai33KeyCount + apiKeyStatus.aimaxKeyCount}</b>
+      </button>
+    </section>
     <section className="srt-voice-config">
       <label><small>FILE ĐẦU VÀO</small><strong>{draft?.name || 'Chưa chọn SRT'}</strong><span>{draft ? `${draft.rows.length} câu phụ đề` : 'Có thể nhận trực tiếp từ tab Dịch'}</span></label>
       <label><small>MÔ HÌNH TẠO GIỌNG</small><select value={engine} onChange={(e) => {setEngine(e.target.value as typeof engine);setApiVoiceId('');setApiVoices([]);}}><option value="capcut">CapCut TTS · Lite</option></select><span>Hai nguồn: backend nội bộ + Hugging Face Space</span></label>
@@ -619,6 +674,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     {dictionaryOpen&&<div className="dictionary-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setDictionaryOpen(false)}}><section className="dictionary-modal"><header><div><strong>Từ điển phát âm CapCut</strong><small>Thay từ sai hoặc tiếng Anh bằng cách viết để TTS đọc đúng trước khi tạo MP3.</small></div><button onClick={()=>setDictionaryOpen(false)}><X size={18}/></button></header><div className="dictionary-actions"><button onClick={()=>saveDictionary([...pronunciationDictionary,{id:`dict-${Date.now()}`,source:'',target:''}])}>+ Thêm từ</button><button onClick={()=>dictionaryImportRef.current?.click()}><UploadCloud size={14}/> Nhập JSON</button><button onClick={exportDictionary}><Download size={14}/> Xuất JSON</button><button className="apply" onClick={applyDictionaryToDraft}><Check size={14}/> Áp dụng vào SRT</button><input ref={dictionaryImportRef} type="file" accept=".json,application/json" hidden onChange={(e)=>{void importDictionary(e.target.files?.[0]);e.currentTarget.value=''}}/></div><div className="dictionary-head"><span>TỪ GỐC / TIẾNG ANH</span><span>CÁCH VIẾT ĐỂ ĐỌC</span><span/></div><div className="dictionary-list">{pronunciationDictionary.map((item)=><article key={item.id}><input value={item.source} onChange={(e)=>saveDictionary(pronunciationDictionary.map((row)=>row.id===item.id?{...row,source:e.target.value}:row))} placeholder="Ví dụ: Facebook"/><input value={item.target} onChange={(e)=>saveDictionary(pronunciationDictionary.map((row)=>row.id===item.id?{...row,target:e.target.value}:row))} placeholder="Ví dụ: phây búc"/><button title="Xóa" onClick={()=>saveDictionary(pronunciationDictionary.filter((row)=>row.id!==item.id))}><Trash2 size={15}/></button></article>)}{!pronunciationDictionary.length&&<div className="dictionary-empty">Chưa có quy tắc. Bấm “Thêm từ” hoặc nhập file JSON.</div>}</div><footer><span>{pronunciationDictionary.length} quy tắc · tự động áp dụng khi tạo voice</span><button onClick={()=>setDictionaryOpen(false)}>Đóng</button></footer></section></div>}
     {jobPickerOpen&&<div className="dictionary-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setJobPickerOpen(false)}}><section className="saved-job-modal"><header><div><strong>Mở job tạo voice đã lưu</strong><small>Chỉ tải job khi bạn chủ động chọn.</small></div><button onClick={()=>setJobPickerOpen(false)}><X size={18}/></button></header><div className="saved-job-picker"><select value={selectedJobId} onChange={(e)=>setSelectedJobId(e.target.value)}><option value="">Chọn job muốn mở…</option>{savedJobs.map((job)=><option key={job.jobId} value={job.jobId}>{job.createdAt||job.jobId} · {job.engine} · {job.completed}/{job.total}{job.failed?` · ${job.failed} lỗi`:''}</option>)}</select>{!savedJobs.length&&<p>Chưa có job nào được lưu.</p>}</div><footer><button onClick={()=>{setSelectedJobId('');setDraft(null);setOutputDir('');setProgress({done:0,total:0});setJobState('idle');setJobPickerOpen(false);setMessage('Đã tạo phiên trống. Hãy chọn file SRT mới.');}}>Job mới</button><button className="primary" disabled={!selectedJobId} onClick={async()=>{await loadSavedJob();setJobPickerOpen(false)}}>Tải job đã chọn</button></footer></section></div>}
     <footer className="srt-voice-footer"><strong>{message}</strong><span>3 lượt tổng cộng · lượt đầu + tối đa 2 lượt chạy lại câu lỗi</span></footer>{audioUrl && <audio className="srt-voice-player" src={audioUrl} controls />}{previewUrl && <audio className="api-voice-preview-player" src={previewUrl} controls />}
+    {apiSettingsOpen&&<div className="dictionary-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setApiSettingsOpen(false)}}><section className="dictionary-modal api-key-modal"><header><div><strong>Cấu hình API tạo giọng</strong><small>Key được mã hóa bằng Windows Safe Storage và không ghi dạng rõ vào file cấu hình.</small></div><button onClick={()=>setApiSettingsOpen(false)}><X size={18}/></button></header><div className="lite-api-key-grid"><label><span>AI33 API key · {apiKeyStatus.ai33KeyCount} key đã lưu</span><textarea value={ai33Key} onChange={(e)=>setAi33Key(e.target.value)} placeholder="Mỗi key một dòng. Để trống nếu không thay đổi."/><button disabled={apiKeyBusy} onClick={()=>void testApiKey('ai33')}>Kiểm tra AI33</button></label><label><span>AIMax API key · {apiKeyStatus.aimaxKeyCount} key đã lưu</span><textarea value={aimaxKey} onChange={(e)=>setAimaxKey(e.target.value)} placeholder="Mỗi key một dòng. Để trống nếu không thay đổi."/><button disabled={apiKeyBusy} onClick={()=>void testApiKey('aimax')}>Kiểm tra AIMax</button></label></div><footer><button onClick={()=>setApiSettingsOpen(false)}>Đóng</button><button className="primary" disabled={apiKeyBusy||(!ai33Key.trim()&&!aimaxKey.trim())} onClick={()=>void saveApiKeys()}>{apiKeyBusy?'Đang xử lý…':'Lưu API key'}</button></footer></section></div>}
   </div>;
 }
 

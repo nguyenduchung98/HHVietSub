@@ -76,7 +76,13 @@ class Worker:
         self.routes: dict[str, Callable[[dict[str, Any]], Any]] = {
             "system.ping": self.ping,
             "project.list": self.project_list,
+            "settings.secrets.export": self.secrets_export,
+            "settings.secrets.set": self.secrets_set,
+            "settings.tts.get": self.tts_settings_get,
+            "settings.tts.save": self.tts_settings_save,
+            "settings.tts.test": self.tts_settings_test,
             "tts.voices.list": self.tts_voices_list,
+            "tts.voice.preview": self.tts_voice_preview,
             "subtitle.parse": self.subtitle_parse,
             "srt.voice.generate": self.srt_voice_generate,
             "srt.voice.regenerate": self.srt_voice_generate,
@@ -607,9 +613,9 @@ class Worker:
         voice_id = str(params.get("voiceId", "")).strip()
         if not isinstance(entries, list) or not entries:
             raise ValueError("Không có câu phụ đề để tạo giọng")
-        if engine != "capcut":
-            raise ValueError("HHVietSub Lite only supports CapCut TTS")
-        if engine == "capcut":
+        if engine not in {"capcut", "ai33", "aimax"}:
+            raise ValueError("HHVietSub Lite supports CapCut TTS, AI33 and AIMax")
+        if engine in {"capcut", "ai33", "aimax"}:
             job_params = {**params, "jobId": str(params.get("jobId") or f"srt-{int(time.time() * 1000)}")}
             try:
                 return self._srt_api_generate(engine, job_params, entries)
