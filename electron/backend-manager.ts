@@ -80,7 +80,11 @@ export class BackendManager {
     if (!this.process || !this.process.stdin.writable) throw new Error('Backend chưa sẵn sàng');
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {
-      const timeoutMs = method === 'studio.generate' || method === 'voice.create' || method === 'subtitle.translate.browser' || method.startsWith('srt.voice.') || method === 'capcut.project.create' || method === 'capcut.project.sync' ? 30 * 60_000 : 30_000;
+      const timeoutMs = method === 'ffmpeg.sync.create'
+        ? 12 * 60 * 60_000
+        : method === 'studio.generate' || method === 'voice.create' || method === 'subtitle.translate.browser' || method.startsWith('srt.voice.') || method === 'capcut.project.create' || method === 'capcut.project.sync'
+          ? 30 * 60_000
+          : 30_000;
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Backend không phản hồi đúng thời hạn (${method}).`));

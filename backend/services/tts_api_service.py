@@ -15,9 +15,12 @@ from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse
 
 from backend.services.settings_service import SettingsService
+from backend.services.capcut_tts_client import BUILTIN_VOICES, synthesize as capcut_synthesize
 
 
 class TtsApiService:
+    CAPCUT_SPACE_URL = "https://tony2k-ai-voice-studio.hf.space"
+
     def __init__(self, settings: SettingsService):
         self.settings = settings
 
@@ -53,6 +56,26 @@ class TtsApiService:
             raise RuntimeError(f"API ({exc.code}): {detail[:600]}") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Không thể kết nối dịch vụ TTS: {exc.reason}") from exc
+
+    def request_json_body(self, url: str, fields: dict[str, Any], timeout: int = 180,
+                          control: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self._cancelled(control):
+            raise RuntimeError("Đã hủy tác vụ")
+        data = json.dumps(fields, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(url, data=data, headers={
+            "User-Agent": "HHVietSub/0.1", "Content-Type": "application/json; charset=utf-8",
+        }, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise RuntimeError("Dịch vụ CapCut TTS trả dữ liệu không hợp lệ")
+                return payload
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"CapCut Space ({exc.code}): {detail[:600]}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Không thể kết nối CapCut TTS Space: {exc.reason}") from exc
 
     def test_keys(self, provider: str, supplied: str = "") -> dict[str, Any]:
         if provider not in {"ai33", "aimax"}:
@@ -91,6 +114,33 @@ class TtsApiService:
 
     def list_voices(self, engine: str, provider: str = "minimax", language: str = "auto") -> dict[str, Any]:
         engine, provider, language = engine.lower(), provider.lower(), language.strip()
+        if engine == "capcut":
+            records = BUILTIN_VOICES
+            voices = []
+            for raw in records:
+                if not isinstance(raw, dict):
+                    continue
+                voice_type = str(raw.get("voice_type", "")).strip()
+                resource_id = str(raw.get("resource_id", "")).strip()
+                voice_language = str(raw.get("lang") or raw.get("lan") or "")
+                if not voice_type or not resource_id:
+                    continue
+                if language and language.lower() != "auto":
+                    expected = {
+                        "vietnamese": "vi", "english": "en", "spanish": "es", "french": "fr",
+                        "german": "de", "portuguese": "pt", "italian": "it", "japanese": "ja",
+                        "korean": "ko", "chinese": "zh", "thai": "th", "indonesian": "id",
+                        "russian": "ru", "arabic": "ar",
+                    }.get(language.lower(), language.lower().split("-")[0])
+                    if expected not in voice_language.lower():
+                        continue
+                voices.append({
+                    "id": f"{voice_type}::{resource_id}",
+                    "name": str(raw.get("display_name") or voice_type),
+                    "previewUrl": "", "language": voice_language,
+                    "provider": "capcut-direct", "personal": False,
+                })
+            return {"engine": engine, "provider": "capcut-direct", "language": language, "voices": voices, "total": len(voices)}
         keys = self.settings.tts_keys(engine)
         if not keys:
             raise ValueError(f"Chưa lưu API key {engine.upper()} trong Cấu hình")
@@ -197,10 +247,46 @@ class TtsApiService:
                      control: dict[str, Any] | None = None) -> dict[str, Any]:
         if self._cancelled(control):
             raise RuntimeError("Đã hủy tác vụ")
+        voice_id = str(params.get("apiVoiceId", "")).strip()
+        if engine == "capcut":
+            if "::" not in voice_id:
+                raise ValueError("Hãy chọn một giọng từ thư viện CapCut")
+            voice_type, resource_id = voice_id.split("::", 1)
+            backend_mode = str(params.get("capcutBackend", "direct")).lower()
+            if backend_mode == "hybrid":
+                backend_mode = "direct" if int(entry.get("id", 1)) % 2 else "space"
+            if backend_mode == "space":
+                created = self.request_json_body(f"{self.CAPCUT_SPACE_URL}/api/tts", {
+                    "text": str(entry.get("text", "")), "voice": voice_type,
+                    "resource_id": resource_id,
+                    "rate": min(3.0, max(.5, float(params.get("speed", 1.0)))),
+                }, control=control)
+                audio_url = str(created.get("speech_url", "")).strip()
+                if not audio_url:
+                    raise RuntimeError("CapCut Space không trả về URL audio")
+                audio_url = urljoin(self.CAPCUT_SPACE_URL + "/", audio_url)
+            else:
+                audio_url = capcut_synthesize(
+                    str(entry.get("text", "")), voice_type, resource_id,
+                    float(params.get("speed", 1.0)),
+                    cancelled=lambda: self._cancelled(control),
+                )
+            with urllib.request.urlopen(
+                urllib.request.Request(audio_url, headers={"User-Agent": "HHVietSub/0.1"}),
+                timeout=120,
+            ) as response:
+                audio = response.read()
+            if len(audio) < 128 or audio.lstrip().startswith((b"<", b"{", b"[")):
+                raise RuntimeError("CapCut trả về file MP3 không hợp lệ")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            temporary = output.with_suffix(output.suffix + ".part")
+            temporary.write_bytes(audio)
+            temporary.replace(output)
+            return {**entry, "status": "completed", "file": str(output), "duration": 0,
+                    "format": "mp3", "engine": engine, "backend": backend_mode}
         keys = self.settings.tts_keys(engine)
         if not keys:
             raise ValueError(f"Chưa lưu API key {engine.upper()} trong Cấu hình")
-        voice_id = str(params.get("apiVoiceId", "")).strip()
         if not voice_id:
             raise ValueError("Chưa nhập Voice ID của dịch vụ API")
         speed = float(params.get("speed", 1.0))

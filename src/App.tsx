@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './studio-v2.css';
 import './voice-modal.css';
 import './studio-layout.css';
@@ -17,6 +17,8 @@ type Voice = { id: string; name: string; language: string; ready: boolean; sourc
 type StudioResult = { id: string; path: string; name: string; bytes: number; duration: number; generationTime: number; seed: number; format: string; voiceId: string; voiceName: string; language: string; text: string; createdAt: string; srtPath?: string };
 type SrtVoiceRow = { id: number; start: string; end: string; text: string; status: 'pending' | 'generating' | 'completed' | 'failed'; duration?: number; file?: string; error?: string };
 type SrtDraft = { name: string; path: string; rows: SrtVoiceRow[] };
+type SrtQueueItem = { id: string; draft: SrtDraft; status: 'waiting'|'running'|'completed'|'failed'|'cancelled'; done: number; total: number; outputDir?: string; error?: string };
+type SrtGenerationResult = { state: 'cancelled'|'completed'; completed: number; failed: number; total: number; items: SrtVoiceRow[]; outputDir: string };
 type ApiVoice = { id: string; name: string; previewUrl?: string; language?: string; provider?: string; personal?: boolean };
 
 const cleanUnicode = (value: string) => new TextDecoder().decode(new TextEncoder().encode(value));
@@ -331,11 +333,15 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
 }
 
 function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft: SrtDraft | null }) {
-  const [engine, setEngine] = useState<'omnivoice' | 'vieneu' | 'ai33' | 'aimax'>('omnivoice');
+  const [engine, setEngine] = useState<'omnivoice' | 'vieneu' | 'ai33' | 'aimax' | 'capcut'>('omnivoice');
   const [apiProvider, setApiProvider] = useState('minimax');
   const [apiModel, setApiModel] = useState('speech-2.8-hd');
   const [apiVoiceId, setApiVoiceId] = useState('');
-  const [apiWorkers, setApiWorkers] = useState(3);
+  const [apiWorkers, setApiWorkers] = useState(8);
+  const [apiRequestInterval, setApiRequestInterval] = useState(() => {
+    const saved = Number(localStorage.getItem('hhvietsub.apiRequestInterval') || 10);
+    return Number.isFinite(saved) ? Math.min(60, Math.max(0, saved)) : 10;
+  });
   const [subtitleLanguage, setSubtitleLanguage] = useState('auto');
   const [omniLanguage, setOmniLanguage] = useState('auto');
   const [omniLanguages, setOmniLanguages] = useState<{id:string;name:string}[]>([{id:'auto',name:'Tự động nhận diện'},{id:'vi',name:'Vietnamese'},{id:'en',name:'English'},{id:'es',name:'Spanish'}]);
@@ -360,6 +366,49 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   const [jobState, setJobState] = useState<'idle'|'running'|'paused'|'cancelled'|'completed'>('idle');
   const [savedJobs, setSavedJobs] = useState<{jobId:string;state:string;engine:string;voiceId:string;outputDir:string;createdAt:string;total:number;completed:number;failed:number}[]>([]);
   const [selectedJobId, setSelectedJobId] = useState('');
+  const [jobPickerOpen, setJobPickerOpen] = useState(false);
+  const [queue, setQueue] = useState<SrtQueueItem[]>([]);
+  const [queueRunning, setQueueRunning] = useState(false);
+  const [capcutBackend, setCapcutBackend] = useState<'direct'|'space'|'hybrid'>('hybrid');
+  const [dictionaryOpen, setDictionaryOpen] = useState(false);
+  const [pronunciationDictionary, setPronunciationDictionary] = useState<{id:string;source:string;target:string}[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('hhvietsub.pronunciationDictionary') || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch { return []; }
+  });
+  const dictionaryImportRef = useRef<HTMLInputElement>(null);
+  const activeQueueId = useRef('');
+  const stopQueue = useRef(false);
+  const saveDictionary = (items: {id:string;source:string;target:string}[]) => {
+    setPronunciationDictionary(items);
+    localStorage.setItem('hhvietsub.pronunciationDictionary', JSON.stringify(items));
+  };
+  const replacePronunciation = (text: string) => pronunciationDictionary.reduce((current, item) => {
+    const source = item.source.trim();
+    if (!source || !item.target.trim()) return current;
+    return current.replace(new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), item.target.trim());
+  }, text);
+  const applyDictionaryToDraft = () => {
+    setDraft((current) => current ? {...current, rows: current.rows.map((row)=>({...row, text: replacePronunciation(row.text), status: row.status === 'completed' ? 'pending' : row.status}))} : current);
+    setQueue((current)=>current.map((item)=>({...item,draft:{...item.draft,rows:item.draft.rows.map((row)=>({...row,text:replacePronunciation(row.text),status:row.status==='completed'?'pending':row.status}))}})));
+    setMessage(`Đã áp dụng ${pronunciationDictionary.filter((item)=>item.source.trim()&&item.target.trim()).length} quy tắc phát âm vào phụ đề.`);
+  };
+  const exportDictionary = () => {
+    const blob = new Blob([JSON.stringify(pronunciationDictionary.map(({source,target})=>({source,target})), null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
+    anchor.href=url; anchor.download='tu-dien-phat-am-capcut.json'; anchor.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+  const importDictionary = async (file?: File) => {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (!Array.isArray(parsed)) throw new Error('File phải là một danh sách JSON');
+      const items = parsed.map((item,index)=>({id:`dict-${Date.now()}-${index}`,source:String(item.source||item.from||''),target:String(item.target||item.to||'')})).filter((item)=>item.source&&item.target);
+      saveDictionary(items); setMessage(`Đã nhập ${items.length} mục từ điển phát âm.`);
+    } catch(error) { setMessage(`Không thể nhập từ điển: ${error instanceof Error?error.message:String(error)}`); }
+  };
   useEffect(() => { if (initialDraft) { setDraft(initialDraft); setMessage(`Đã nhận ${initialDraft.rows.length} câu từ tab Dịch.`); } }, [initialDraft]);
   useEffect(() => { window.desktop?.request<{id:string;name:string}[]>('voice.languages').then((items)=>{if(items?.length)setOmniLanguages(items);}).catch(()=>undefined); }, []);
   useEffect(() => { if (!voiceId && voices.length) setVoiceId(voices.find((voice) => voice.ready)?.id || ''); }, [voices, voiceId]);
@@ -382,6 +431,12 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     if (data.event === 'progress' && data.item) {
       setProgress({ done: data.done || 0, total: data.total || 0 });
       setDraft((current) => current ? { ...current, rows: current.rows.map((row) => row.id === data.item!.id ? { ...row, ...data.item } : row) } : current);
+      if (activeQueueId.current) {
+        setQueue((current) => current.map((item) => item.id === activeQueueId.current ? {
+          ...item, done: data.done || item.done, total: data.total || item.total,
+          draft: { ...item.draft, rows: item.draft.rows.map((row) => row.id === data.item!.id ? { ...row, ...data.item } : row) },
+        } : item));
+      }
     }
   }), []);
   const refreshSavedJobs = () => window.desktop?.request<typeof savedJobs>('srt.voice.list').then((jobs)=>setSavedJobs(jobs || [])).catch(()=>undefined);
@@ -389,7 +444,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
   const loadSavedJob = async () => {
     if (!window.desktop || !selectedJobId || running) return;
     try {
-      const job = await window.desktop.request<{jobId:string;state:string;engine:'omnivoice'|'vieneu'|'ai33'|'aimax';provider:string;model:string;voiceId:string;subtitleLanguage?:string;workers:number;outputDir:string;entries:{id:number;start:string;end:string;text:string}[];items:SrtVoiceRow[]}>('srt.voice.get',{jobId:selectedJobId});
+      const job = await window.desktop.request<{jobId:string;state:string;engine:'omnivoice'|'vieneu'|'ai33'|'aimax'|'capcut';provider:string;model:string;voiceId:string;subtitleLanguage?:string;workers:number;outputDir:string;entries:{id:number;start:string;end:string;text:string}[];items:SrtVoiceRow[]}>('srt.voice.get',{jobId:selectedJobId});
       setActiveJobId(job.jobId); setJobState(job.state === 'running' || job.state === 'failed' ? 'cancelled' : job.state as typeof jobState); setEngine(job.engine); setApiProvider(job.provider || 'minimax'); setApiModel(job.model || 'speech-2.8-hd');
       if (job.engine === 'omnivoice') setVoiceId(job.voiceId || ''); else setApiVoiceId(job.voiceId || '');
       setSubtitleLanguage(job.subtitleLanguage || 'auto'); if(job.engine==='omnivoice') setOmniLanguage(job.subtitleLanguage || 'auto');
@@ -400,21 +455,40 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
       setMessage(`Đã tải job ${job.jobId}. Bấm Tạo tất cả để tiếp tục các file còn thiếu hoặc tạo lại từng câu.`);
     } catch(error){setMessage(error instanceof Error?error.message:String(error));}
   };
+  const parseSrtFiles = async (paths: string[], rootFolder?: string) => {
+    if (!window.desktop) return [];
+    const loaded: SrtQueueItem[] = [];
+    for (const filePath of paths) {
+      const result = await window.desktop.request<{ path: string; name: string; entries: { id: number; start: string; end: string; source: string }[]; warnings: string[] }>('subtitle.parse', { path: filePath });
+      const parsed: SrtDraft = { name: result.name, path: result.path, rows: result.entries.map((row) => ({ id: row.id, start: row.start, end: row.end, text: row.source, status: 'pending' })) };
+      const stem = result.name.replace(/\.srt$/i, '').replace(/[<>:"/\\|?*]+/g, '-').trim() || `subtitle-${loaded.length + 1}`;
+      const separator = Math.max(result.path.lastIndexOf('\\'), result.path.lastIndexOf('/'));
+      const sourceFolder = separator >= 0 ? result.path.slice(0, separator) : '.';
+      loaded.push({ id: `${Date.now()}-${loaded.length}`, draft: parsed, status: 'waiting', done: 0, total: parsed.rows.length, outputDir: `${rootFolder || sourceFolder}\\${stem}` });
+    }
+    return loaded;
+  };
   const chooseSrt = async () => {
-    const path = await window.desktop?.selectFile({ filters: [{ name: 'SubRip Subtitle', extensions: ['srt'] }] });
-    if (!path || !window.desktop) return;
+    const path = await window.desktop?.selectFile({ title: 'Chọn một file SRT', filters: [{ name: 'SubRip Subtitle', extensions: ['srt'] }] });
+    if (!path) return;
     try {
-      const result = await window.desktop.request<{ path: string; name: string; entries: { id: number; start: string; end: string; source: string }[]; warnings: string[] }>('subtitle.parse', { path });
-      setDraft({ name: result.name, path: result.path, rows: result.entries.map((row) => ({ id: row.id, start: row.start, end: row.end, text: row.source, status: 'pending' })) });
-      setOutputDir(''); setProgress({ done: 0, total: result.entries.length });
-      setMessage(`Đã tải ${result.entries.length} câu${result.warnings.length ? ` · ${result.warnings.length} cảnh báo` : ''}.`);
+      const [item] = await parseSrtFiles([path]);
+      if (!item) return;
+      setQueue([]); setDraft(item.draft); setOutputDir(item.outputDir || ''); setProgress({ done: 0, total: item.total });
+      setMessage(`Đã tải ${item.draft.name} · ${item.total} câu. Kết quả tự lưu tại ${item.outputDir}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
-  const chooseOutput = async () => {
-    const folder = await window.desktop?.selectFolder();
-    if (!folder || !draft) return;
-    const stem = draft.name.replace(/\.srt$/i, '').replace(/[<>:"/\\|?*]+/g, '-').trim() || 'subtitle';
-    setOutputDir(`${folder}\\${stem}_voice`);
+  const chooseSrtFolder = async () => {
+    try {
+      if (!window.desktop) return;
+      const folder = await window.desktop.selectFolder();
+      if (!folder) return;
+      const selected = await window.desktop.listSrtFiles(folder);
+      if (!selected.files.length) return setMessage('Thư mục đã chọn không có file SRT.');
+      const loaded = await parseSrtFiles(selected.files, selected.folder);
+      setQueue(loaded); setDraft(loaded[0].draft); setOutputDir(loaded[0].outputDir || ''); setProgress({ done: 0, total: loaded[0].total });
+      setMessage(`Đã quét ${loaded.length} file SRT. Kết quả sẽ lưu trong thư mục gốc, mỗi file có một thư mục cùng tên.`);
+    } catch (error) { setMessage(`Không thể quét thư mục SRT: ${error instanceof Error ? error.message : String(error)}. Hãy đóng và mở lại ứng dụng nếu vừa cập nhật V2.`); }
   };
   const updateText = (id: number, text: string) => setDraft((current) => current ? { ...current, rows: current.rows.map((row) => row.id === id ? { ...row, text, status: row.status === 'completed' ? 'pending' : row.status } : row) } : current);
   const loadApiVoices = async () => {
@@ -422,10 +496,18 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     setVoiceLibraryOpen(true); setVoiceLibraryLoading(true); setApiVoices([]);
     try {
       const result = await window.desktop.request<{ voices: ApiVoice[]; total: number }>('tts.voices.list', { engine, provider: apiProvider, language: subtitleLanguage });
-      setApiVoices(result.voices); setMessage(`Đã tải ${result.total} giọng từ ${engine === 'ai33' ? 'AI33' : 'AIMax'}.`);
+      setApiVoices(result.voices);
+      if (engine === 'capcut' && result.voices.length) {
+        setApiVoiceId((current)=>result.voices.some((voice)=>voice.id===current)?current:result.voices[0].id);
+      }
+      setMessage(result.total ? `Đã tải ${result.total} giọng từ ${engine === 'ai33' ? 'AI33' : engine === 'aimax' ? 'AIMax' : 'CapCut Space'}.` : 'Không có giọng phù hợp với ngôn ngữ đang chọn.');
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setVoiceLibraryLoading(false); }
   };
+  useEffect(() => {
+    if (engine !== 'capcut' || apiVoiceId || voiceLibraryLoading) return;
+    void loadApiVoices();
+  }, [engine, subtitleLanguage]);
   const chooseApiVoice = (voice: ApiVoice) => { setApiVoiceId(voice.id); setVoiceLibraryOpen(false); setMessage(`Đã chọn giọng ${voice.name} · ${voice.id}`); };
   const playApiVoice = async (voice: ApiVoice) => {
     if (!voice.previewUrl) return setMessage('Giọng này không có audio nghe thử.');
@@ -436,16 +518,67 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
   const [autoRetry, setAutoRetry] = useState(true);
+  const runQueue = async () => {
+    if (!window.desktop || running || !queue.some((item) => item.status !== 'completed')) return;
+    if (engine === 'omnivoice' && !voiceId) return setMessage('Hãy chọn một hồ sơ giọng OmniVoice hoàn chỉnh.');
+    if ((engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && !apiVoiceId.trim()) return setMessage('Hãy chọn giọng của dịch vụ TTS.');
+    const scheduled = queue.filter((item) => item.status !== 'completed');
+    const baseFolder = scheduled.some((item) => !item.outputDir) ? await window.desktop.selectFolder() : '';
+    if (scheduled.some((item) => !item.outputDir) && !baseFolder) return;
+
+    stopQueue.current = false; setQueueRunning(true); setRunning(true);
+    for (let index = 0; index < scheduled.length; index += 1) {
+      const item = scheduled[index];
+      if (stopQueue.current) break;
+      const stem = item.draft.name.replace(/\.srt$/i, '').replace(/[<>:"/\\|?*]+/g, '-').trim() || `subtitle-${index + 1}`;
+      const destination = item.outputDir || `${baseFolder}\\${stem}`;
+      const jobId = `srt-queue-${Date.now()}-${index + 1}`;
+      activeQueueId.current = item.id;
+      setDraft(item.draft); setOutputDir(destination); setProgress({ done: 0, total: item.total });
+      setActiveJobId(jobId); setJobState('running');
+      setQueue((current) => current.map((queued) => queued.id === item.id ? { ...queued, status: 'running', done: 0, outputDir: destination, error: undefined } : queued));
+      setMessage(`Hàng chờ ${index + 1}/${scheduled.length} · đang tạo ${item.draft.name}`);
+      try {
+        let result: SrtGenerationResult | undefined;
+        const maxPasses = autoRetry ? 3 : 1;
+        for (let pass = 1; pass <= maxPasses; pass += 1) {
+          result = await window.desktop.request<SrtGenerationResult>('srt.voice.generate', {
+            entries: item.draft.rows.filter((row)=>row.text.trim()).map((row) => ({ id: row.id, start: row.start, end: row.end, text: replacePronunciation(row.text) })),
+            voiceId, outputDir: destination, jobId: `${jobId}-pass-${pass}`, engine, apiProvider, apiModel, apiVoiceId: apiVoiceId.trim(), apiWorkers, apiRequestInterval, capcutBackend,
+            subtitleLanguage, vieneuBatchSize, vieneuVoice, language: engine === 'omnivoice' ? (omniLanguage === 'auto' ? '' : omniLanguage) : 'vi',
+            speed, steps, guidance, postprocess: true, denoise: false, skipExisting: true,
+          });
+          if (result.state === 'cancelled' || result.failed === 0 || pass === maxPasses) break;
+          setMessage(`Hàng chờ ${index + 1}/${scheduled.length} · ${item.draft.name} còn ${result.failed} câu lỗi · chạy lại lượt ${pass + 1}/3 sau 3 giây…`);
+          await new Promise((resolve)=>setTimeout(resolve,3000));
+          if (stopQueue.current) break;
+        }
+        if (!result) throw new Error('Không nhận được kết quả tạo voice');
+        const byId = new Map(result.items.map((row)=>[row.id,row]));
+        const updatedDraft = { ...item.draft, rows: item.draft.rows.map((row)=>({ ...row, ...(byId.get(row.id)||{}) })) };
+        const status: SrtQueueItem['status'] = result.state === 'cancelled' ? 'cancelled' : result.failed ? 'failed' : 'completed';
+        setDraft(updatedDraft); setProgress({ done: result.total, total: result.total });
+        setQueue((current) => current.map((queued) => queued.id === item.id ? { ...queued, draft: updatedDraft, status, done: result.total, total: result.total, outputDir: destination, error: result.failed ? `${result.failed} câu lỗi` : undefined } : queued));
+        if (result.state === 'cancelled') { stopQueue.current = true; break; }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        setQueue((current) => current.map((queued) => queued.id === item.id ? { ...queued, status: 'failed', outputDir: destination, error: detail } : queued));
+        setMessage(`File ${item.draft.name} lỗi: ${detail}. Đang chuyển file kế tiếp…`);
+      }
+    }
+    activeQueueId.current = ''; setQueueRunning(false); setRunning(false); refreshSavedJobs();
+    setMessage(stopQueue.current ? 'Đã dừng hàng chờ. Các file chưa chạy vẫn được giữ lại.' : 'Hàng chờ đã xử lý xong tất cả file.');
+  };
   const run = async (only?: SrtVoiceRow, selectedRows?: SrtVoiceRow[], retryPass = 0) => {
     if (!window.desktop || !draft || running) return;
     if (engine === 'omnivoice' && !voiceId) return setMessage('Hãy chọn một hồ sơ giọng OmniVoice hoàn chỉnh.');
-    if ((engine === 'ai33' || engine === 'aimax') && !apiVoiceId.trim()) return setMessage('Hãy nhập Voice ID của dịch vụ API.');
+    if ((engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && !apiVoiceId.trim()) return setMessage('Hãy chọn giọng của dịch vụ TTS.');
     let destination = outputDir;
     if (!destination) {
-      const folder = await window.desktop.selectFolder();
-      if (!folder) return;
       const stem = draft.name.replace(/\.srt$/i, '').replace(/[<>:"/\\|?*]+/g, '-').trim() || 'subtitle';
-      destination = `${folder}\\${stem}_voice`; setOutputDir(destination);
+      const separator = Math.max(draft.path.lastIndexOf('\\'), draft.path.lastIndexOf('/'));
+      if (separator < 0) return setMessage('Không xác định được thư mục của file SRT.');
+      destination = `${draft.path.slice(0, separator)}\\${stem}`; setOutputDir(destination);
     }
     const entries = selectedRows || (only ? [only] : draft.rows.filter((row) => row.text.trim()));
     const jobId = `srt-${Date.now()}`; setActiveJobId(jobId); setJobState('running');
@@ -453,8 +586,8 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     setDraft((current) => current ? { ...current, rows: current.rows.map((row) => entries.some((e) => e.id === row.id) ? { ...row, status: 'pending' as const, error: undefined } : row) } : current);
     try {
       const result = await window.desktop.request<{ state: 'cancelled'|'completed'; completed: number; failed: number; total: number; items: SrtVoiceRow[]; outputDir: string }>(only ? 'srt.voice.regenerate' : 'srt.voice.generate', {
-        entries: entries.map((row) => ({ id: row.id, start: row.start, end: row.end, text: row.text })), voiceId, outputDir: destination,
-        jobId, engine, apiProvider, apiModel, apiVoiceId: apiVoiceId.trim(), apiWorkers, apiRequestInterval: 10, subtitleLanguage, vieneuBatchSize, vieneuVoice, language: engine === 'omnivoice' ? (omniLanguage === 'auto' ? '' : omniLanguage) : 'vi', speed, steps, guidance, postprocess: true, denoise: false, skipExisting: !only && !selectedRows,
+        entries: entries.map((row) => ({ id: row.id, start: row.start, end: row.end, text: replacePronunciation(row.text) })), voiceId, outputDir: destination,
+        jobId, engine, apiProvider, apiModel, apiVoiceId: apiVoiceId.trim(), apiWorkers, apiRequestInterval, capcutBackend, subtitleLanguage, vieneuBatchSize, vieneuVoice, language: engine === 'omnivoice' ? (omniLanguage === 'auto' ? '' : omniLanguage) : 'vi', speed, steps, guidance, postprocess: true, denoise: false, skipExisting: !only && !selectedRows,
       });
       let updatedRows = draft.rows;
       setDraft((current) => {
@@ -464,7 +597,7 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
       });
       setJobState(result.state === 'cancelled' ? 'cancelled' : 'completed');
       const failedItems = updatedRows.filter((r) => r.status === 'failed');
-      if (autoRetry && result.state !== 'cancelled' && failedItems.length > 0 && retryPass < 3) {
+      if (autoRetry && result.state !== 'cancelled' && failedItems.length > 0 && retryPass < 2) {
         setMessage(`Lượt ${retryPass + 1} xong. Phát hiện ${failedItems.length} câu lỗi. Đang tự động chạy lại lượt ${retryPass + 2}/3 sau 3 giây…`);
         setRunning(false);
         await new Promise((res) => setTimeout(res, 3000));
@@ -478,27 +611,33 @@ function SrtVoicePage({ voices, initialDraft }: { voices: Voice[]; initialDraft:
     }
     finally { setRunning(false); refreshSavedJobs(); }
   };
-  const controlJob = async (action:'pause'|'resume'|'cancel') => { if(!activeJobId || !window.desktop) return; try { const r=await window.desktop.request<{state:typeof jobState}>('srt.voice.control',{jobId:activeJobId,action}); setJobState(r.state); setMessage(action==='pause'?'Đã tạm dừng gửi câu mới. Các request đang chạy vẫn hoàn tất an toàn.':action==='resume'?'Đang tiếp tục job…':'Đã yêu cầu huỷ job.'); } catch(error){ setMessage(error instanceof Error?error.message:String(error)); } };
+  const controlJob = async (action:'pause'|'resume'|'cancel') => { if(!activeJobId || !window.desktop) return; if(action==='cancel' && queueRunning) stopQueue.current=true; try { const r=await window.desktop.request<{state:typeof jobState}>('srt.voice.control',{jobId:activeJobId,action}); setJobState(r.state); setMessage(action==='pause'?'Đã tạm dừng gửi câu mới. Các request đang chạy vẫn hoàn tất an toàn.':action==='resume'?'Đang tiếp tục job…':'Đã yêu cầu huỷ job và dừng hàng chờ.'); } catch(error){ setMessage(error instanceof Error?error.message:String(error)); } };
   const play = async (row: SrtVoiceRow) => { if (!row.file) return; const url = await window.desktop?.readAudio(row.file); if (url) { setAudioUrl(url); setTimeout(() => document.querySelector<HTMLAudioElement>('.srt-voice-player')?.play(), 0); } };
   const completed = draft?.rows.filter((row) => row.status === 'completed').length || 0;
   const failed = draft?.rows.filter((row) => row.status === 'failed').length || 0;
   return <div className="srt-voice-page">
-    <div className="srt-voice-hero"><div><div className="eyebrow"><Captions size={14} /> VOICE BATCH JOB</div><h1>Tạo giọng từ <span>phụ đề SRT.</span></h1><p>Job chỉ được tải khi bạn chủ động chọn; có thể tiếp tục hoặc tạo lại từng câu.</p></div><div className="srt-voice-actions"><button className="secondary" onClick={chooseSrt}><UploadCloud size={16} /> Chọn file SRT</button>{running && <>{engine!=='omnivoice' && (jobState==='paused'?<button className="job-resume" onClick={()=>controlJob('resume')}><Play size={16}/> Tiếp tục</button>:<button className="job-pause" onClick={()=>controlJob('pause')}><Pause size={16}/> Tạm dừng</button>)}<button className="job-cancel" onClick={()=>controlJob('cancel')}><Square size={15}/> Dừng / Huỷ</button></>}{!running && failed>0 && <button className="job-retry" onClick={()=>run(undefined,draft!.rows.filter((x)=>x.status==='failed'))}><RefreshCw size={15}/> Chạy lại {failed} lỗi</button>}<button className="primary" disabled={!draft?.rows.length || running} onClick={() => run()}>{running ? <><RefreshCw className="spin" size={17} /> {jobState==='paused'?'Đã tạm dừng':`Đang tạo ${progress.done}/${progress.total}`}</> : <><AudioLines size={17} /> {jobState==='cancelled'?'Tiếp tục phần còn lại':'Tạo tất cả'}</>}</button></div></div>
+    <div className="srt-voice-hero"><div><div className="eyebrow"><Captions size={14} /> VOICE BATCH QUEUE V2</div><h1>Tạo giọng từ <span>file hoặc thư mục SRT.</span></h1><p>Chạy riêng một file hoặc quét cả thư mục và tự động tạo liên tục.</p></div><div className="srt-voice-actions"><button className="secondary" disabled={running} onClick={chooseSrt}><UploadCloud size={16} /> Chọn 1 file SRT</button><button className="secondary folder-queue" disabled={running} onClick={chooseSrtFolder}><FolderOpen size={16} /> Chọn thư mục SRT</button>{running && <>{engine!=='omnivoice' && (jobState==='paused'?<button className="job-resume" onClick={()=>controlJob('resume')}><Play size={16}/> Tiếp tục</button>:<button className="job-pause" onClick={()=>controlJob('pause')}><Pause size={16}/> Tạm dừng</button>)}<button className="job-cancel" onClick={()=>controlJob('cancel')}><Square size={15}/> Dừng / Huỷ</button></>}{!running && failed>0 && <button className="job-retry" onClick={()=>run(undefined,draft!.rows.filter((x)=>x.status==='failed'))}><RefreshCw size={15}/> Chạy lại {failed} lỗi</button>}{queue.length>0&&<button className="queue-run" disabled={running||!queue.some((item)=>item.status!=='completed')||(engine==='capcut'&&!apiVoiceId)} onClick={runQueue}><Play size={16}/> Chạy hàng chờ ({queue.filter((item)=>item.status!=='completed').length})</button>}<button className="primary" disabled={!draft?.rows.length || running || (engine==='capcut'&&!apiVoiceId)} title={engine==='capcut'&&!apiVoiceId?'Đang chờ tải và chọn giọng CapCut':''} onClick={() => run()}>{running ? <><RefreshCw className="spin" size={17} /> {jobState==='paused'?'Đã tạm dừng':`Đang tạo ${progress.done}/${progress.total}`}</> : engine==='capcut'&&!apiVoiceId ? <><RefreshCw className={voiceLibraryLoading?'spin':''} size={17}/> {voiceLibraryLoading?'Đang tải giọng…':'Chọn giọng trước'}</> : <><AudioLines size={17} /> {jobState==='cancelled'?'Tiếp tục phần còn lại':'Tạo file đang mở'}</>}</button></div></div>
     <section className="srt-output-bar"><div><FolderOpen size={17}/><span><small>JOB ĐÃ LƯU · KHÔNG TỰ ĐỘNG TẢI</small><select value={selectedJobId} onChange={(e)=>setSelectedJobId(e.target.value)}><option value="">Chọn job muốn mở…</option>{savedJobs.map((job)=><option key={job.jobId} value={job.jobId}>{job.createdAt || job.jobId} · {job.engine} · {job.voiceId || 'chưa chọn giọng'} · {job.completed}/{job.total}{job.failed?` · ${job.failed} lỗi`:''}</option>)}</select></span></div><button disabled={!selectedJobId||running} onClick={loadSavedJob}>Tải job</button><button disabled={running} onClick={()=>{setSelectedJobId('');setDraft(null);setOutputDir('');setProgress({done:0,total:0});setJobState('idle');setMessage('Đã tạo phiên trống. Hãy chọn file SRT mới.');}}>Job mới</button></section>
+    {queue.length>0&&<section className="srt-queue-panel"><header><div><strong>HÀNG CHỜ TẠO VOICE</strong><small>{queue.filter((item)=>item.status==='completed').length}/{queue.length} file hoàn thành</small></div><button disabled={running} onClick={()=>setQueue((current)=>current.filter((item)=>item.status!=='completed'))}>Dọn file đã xong</button><button disabled={running} onClick={()=>{setQueue([]);setMessage('Đã xóa hàng chờ.');}}>Xóa hàng chờ</button></header><div className="srt-queue-list">{queue.map((item,index)=><article key={item.id} className={item.status} onClick={()=>{if(running)return;setDraft(item.draft);setOutputDir(item.outputDir||'');setProgress({done:item.done,total:item.total});}}><b>{index+1}</b><div><strong>{item.draft.name}</strong><small>{item.done}/{item.total} câu{item.error?` · ${item.error}`:''}</small></div><span>{item.status==='waiting'?'Đang chờ':item.status==='running'?'Đang tạo':item.status==='completed'?'Hoàn thành':item.status==='cancelled'?'Đã dừng':'Có lỗi'}</span><button disabled={running} title="Xóa khỏi hàng chờ" onClick={(event)=>{event.stopPropagation();setQueue((current)=>current.filter((queued)=>queued.id!==item.id));}}><X size={14}/></button></article>)}</div></section>}
+    {engine==='capcut'&&<section className="capcut-voice-tools"><label><small>NGUỒN CAPCUT TTS</small><select value={capcutBackend} onChange={(e)=>setCapcutBackend(e.target.value as typeof capcutBackend)}><option value="hybrid">Kết hợp nội bộ + Space (nhanh nhất)</option><option value="direct">Chỉ backend nội bộ</option><option value="space">Chỉ Hugging Face Space</option></select><span>{capcutBackend==='hybrid'?'Chia câu chẵn/lẻ cho hai nguồn; mỗi nguồn cách request 10 giây.':capcutBackend==='direct'?'Gọi trực tiếp CapCut API.':'Dùng tony2k/ai-voice-studio như trước.'}</span></label><button type="button" onClick={()=>setDictionaryOpen(true)}><FileText size={15}/> Từ điển phát âm <b>{pronunciationDictionary.length}</b></button></section>}
+    <div className="saved-job-compact"><button type="button" disabled={running} onClick={()=>setJobPickerOpen(true)}><FolderOpen size={15}/> Job đã lưu <b>{savedJobs.length}</b></button></div>
     <section className="srt-voice-config">
       <label><small>FILE ĐẦU VÀO</small><strong>{draft?.name || 'Chưa chọn SRT'}</strong><span>{draft ? `${draft.rows.length} câu phụ đề` : 'Có thể nhận trực tiếp từ tab Dịch'}</span></label>
-      <label><small>MÔ HÌNH TẠO GIỌNG</small><select value={engine} onChange={(e) => setEngine(e.target.value as typeof engine)}><option value="omnivoice">OmniVoice · Local</option><option value="vieneu">VieNeu-TTS · Local GPU</option><option value="ai33">AI33 API</option><option value="aimax">AIMax API</option></select></label>
-      {engine === 'omnivoice' ? <><label><small>GIỌNG OMNIVOICE</small><select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>{voices.filter((voice) => voice.ready).map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></label><label><small>NGÔN NGỮ PHỤ ĐỀ</small><select value={omniLanguage} onChange={(e)=>setOmniLanguage(e.target.value)}>{omniLanguages.map((item)=><option key={item.id} value={item.id}>{item.name}{item.id !== 'auto' ? ` (${item.id})` : ''}</option>)}</select></label><label><small>STEP / GUIDANCE</small><div className="inline-numbers"><input type="number" min="4" max="64" value={steps} onChange={(e) => setSteps(Number(e.target.value))} /><input type="number" min="0.5" max="5" step="0.1" value={guidance} onChange={(e) => setGuidance(Number(e.target.value))} /></div></label></> : engine === 'vieneu' ? <><label><small>GIỌNG VIENEU v3 TURBO</small><select value={vieneuVoice} onChange={(e)=>setVieneuVoice(e.target.value)}>{['Ngọc Lan','Ngọc Linh','Trúc Ly','Mỹ Duyên','Xuân Vĩnh','Thái Sơn','Gia Bảo','Đức Trí','Trọng Hữu','Bình An'].map((name)=><option key={name}>{name}</option>)}</select><span>48 kHz · giọng tích hợp chính thức</span></label><label><small>BATCH GPU</small><input type="number" min="1" max="32" value={vieneuBatchSize} onChange={(e)=>setVieneuBatchSize(Math.min(32,Math.max(1,Number(e.target.value)||1)))}/><span>RTX 3060: khuyên dùng 8</span></label></> : <><label><small>VOICE ID</small><div className="voice-id-picker"><input value={apiVoiceId} onChange={(e) => setApiVoiceId(e.target.value)} placeholder="Chọn trong thư viện hoặc nhập ID"/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div></label><label><small>NHÀ CUNG CẤP {engine === 'aimax' ? '/ MODEL' : ''}</small><div className="inline-numbers"><select value={apiProvider} onChange={(e) => { const p=e.target.value; setApiProvider(p); setApiVoices([]); setApiModel(p === 'minimax' ? 'speech-2.8-hd' : 'eleven_multilingual_v2'); }}><option value="minimax">MiniMax</option><option value="elevenlabs">ElevenLabs</option>{engine === 'ai33' && <><option value="edge">Edge</option><option value="kokoro">Kokoro</option><option value="vbee">Vbee</option><option value="fishaudio">Fish Audio</option><option value="clone">Giọng clone</option></>}</select>{engine === 'aimax' && <select value={apiModel} onChange={(e) => setApiModel(e.target.value)}>{apiProvider === 'minimax' ? <><option value="speech-2.8-hd">2.8 HD</option><option value="speech-2.8-turbo">2.8 Turbo</option><option value="speech-2.6-hd">2.6 HD</option><option value="speech-2.6-turbo">2.6 Turbo</option><option value="speech-02-hd">02 HD</option><option value="speech-02-turbo">02 Turbo</option></> : <><option value="eleven_v3">Eleven v3</option><option value="eleven_multilingual_v2">Multilingual v2</option><option value="eleven_flash_v2_5">Flash v2.5</option><option value="eleven_turbo_v2_5">Turbo v2.5</option></>}</select>}</div></label></>}
+      <label><small>MÔ HÌNH TẠO GIỌNG</small><select value={engine} onChange={(e) => {setEngine(e.target.value as typeof engine);setApiVoiceId('');setApiVoices([]);}}><option value="omnivoice">OmniVoice · Local</option><option value="vieneu">VieNeu-TTS · Local GPU</option><option value="capcut">CapCut TTS · Backend nội bộ</option><option value="ai33">AI33 API</option><option value="aimax">AIMax API</option></select></label>
+      {engine === 'omnivoice' ? <><label><small>GIỌNG OMNIVOICE</small><select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>{voices.filter((voice) => voice.ready).map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></label><label><small>NGÔN NGỮ PHỤ ĐỀ</small><select value={omniLanguage} onChange={(e)=>setOmniLanguage(e.target.value)}>{omniLanguages.map((item)=><option key={item.id} value={item.id}>{item.name}{item.id !== 'auto' ? ` (${item.id})` : ''}</option>)}</select></label><label><small>STEP / GUIDANCE</small><div className="inline-numbers"><input type="number" min="4" max="64" value={steps} onChange={(e) => setSteps(Number(e.target.value))} /><input type="number" min="0.5" max="5" step="0.1" value={guidance} onChange={(e) => setGuidance(Number(e.target.value))} /></div></label></> : engine === 'vieneu' ? <><label><small>GIỌNG VIENEU v3 TURBO</small><select value={vieneuVoice} onChange={(e)=>setVieneuVoice(e.target.value)}>{['Ngọc Lan','Ngọc Linh','Trúc Ly','Mỹ Duyên','Xuân Vĩnh','Thái Sơn','Gia Bảo','Đức Trí','Trọng Hữu','Bình An'].map((name)=><option key={name}>{name}</option>)}</select><span>48 kHz · giọng tích hợp chính thức</span></label><label><small>BATCH GPU</small><input type="number" min="1" max="32" value={vieneuBatchSize} onChange={(e)=>setVieneuBatchSize(Math.min(32,Math.max(1,Number(e.target.value)||1)))}/><span>RTX 3060: khuyên dùng 8</span></label></> : engine === 'capcut' ? <><label className={!apiVoiceId?'voice-required':''}><small>GIỌNG CAPCUT SPACE</small><div className="voice-id-picker"><input value={apiVoices.find((voice)=>voice.id===apiVoiceId)?.name||''} readOnly placeholder={voiceLibraryLoading?'Đang tải thư viện giọng…':'Chưa chọn giọng'}/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div><span>{apiVoiceId?'Đã sẵn sàng tạo voice':'Bắt buộc chọn giọng trước khi chạy'}</span></label><label><small>DỊCH VỤ</small><strong>tony2k · AI Voice Studio</strong><span>CapCut TTS từ Hugging Face Space · không cần API key</span></label></> : <><label><small>VOICE ID</small><div className="voice-id-picker"><input value={apiVoiceId} onChange={(e) => setApiVoiceId(e.target.value)} placeholder="Chọn trong thư viện hoặc nhập ID"/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div></label><label><small>NHÀ CUNG CẤP {engine === 'aimax' ? '/ MODEL' : ''}</small><div className="inline-numbers"><select value={apiProvider} onChange={(e) => { const p=e.target.value; setApiProvider(p); setApiVoices([]); setApiModel(p === 'minimax' ? 'speech-2.8-hd' : 'eleven_multilingual_v2'); }}><option value="minimax">MiniMax</option><option value="elevenlabs">ElevenLabs</option>{engine === 'ai33' && <><option value="edge">Edge</option><option value="kokoro">Kokoro</option><option value="vbee">Vbee</option><option value="fishaudio">Fish Audio</option><option value="clone">Giọng clone</option></>}</select>{engine === 'aimax' && <select value={apiModel} onChange={(e) => setApiModel(e.target.value)}>{apiProvider === 'minimax' ? <><option value="speech-2.8-hd">2.8 HD</option><option value="speech-2.8-turbo">2.8 Turbo</option><option value="speech-2.6-hd">2.6 HD</option><option value="speech-2.6-turbo">2.6 Turbo</option><option value="speech-02-hd">02 HD</option><option value="speech-02-turbo">02 Turbo</option></> : <><option value="eleven_v3">Eleven v3</option><option value="eleven_multilingual_v2">Multilingual v2</option><option value="eleven_flash_v2_5">Flash v2.5</option><option value="eleven_turbo_v2_5">Turbo v2.5</option></>}</select>}</div></label></>}
       <label><small>TỐC ĐỘ · {speed.toFixed(2)}×</small><input type="range" min="0.6" max="1.5" step="0.05" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} /></label>
-      {(engine === 'ai33' || engine === 'aimax') && <label><small>NGÔN NGỮ PHỤ ĐỀ</small><select value={subtitleLanguage} onChange={(e)=>{setSubtitleLanguage(e.target.value);setApiVoices([]);}}><option value="auto">Tự động nhận diện</option><option value="Vietnamese">Tiếng Việt</option><option value="English">Tiếng Anh</option><option value="Spanish">Tiếng Tây Ban Nha</option><option value="French">Tiếng Pháp</option><option value="German">Tiếng Đức</option><option value="Portuguese">Tiếng Bồ Đào Nha</option><option value="Italian">Tiếng Ý</option><option value="Japanese">Tiếng Nhật</option><option value="Korean">Tiếng Hàn</option><option value="Chinese">Tiếng Trung</option><option value="Thai">Tiếng Thái</option><option value="Indonesian">Tiếng Indonesia</option><option value="Russian">Tiếng Nga</option><option value="Arabic">Tiếng Ả Rập</option></select><span>Dùng để lọc giọng và tạo đúng phát âm</span></label>}
-      {(engine === 'ai33' || engine === 'aimax') && <label><small>SỐ LUỒNG API</small><input type="number" min="1" max="32" value={apiWorkers} onChange={(e)=>setApiWorkers(Math.min(32,Math.max(1,Number(e.target.value)||1)))}/><span>Mỗi request khởi chạy cách nhau 10 giây · request đang chạy vẫn xử lý song song</span></label>}
+      {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>NGÔN NGỮ PHỤ ĐỀ</small><select value={subtitleLanguage} onChange={(e)=>{setSubtitleLanguage(e.target.value);setApiVoices([]);setApiVoiceId('');}}><option value="auto">Tự động nhận diện</option><option value="Vietnamese">Tiếng Việt</option><option value="English">Tiếng Anh</option><option value="Spanish">Tiếng Tây Ban Nha</option><option value="French">Tiếng Pháp</option><option value="German">Tiếng Đức</option><option value="Portuguese">Tiếng Bồ Đào Nha</option><option value="Italian">Tiếng Ý</option><option value="Japanese">Tiếng Nhật</option><option value="Korean">Tiếng Hàn</option><option value="Chinese">Tiếng Trung</option><option value="Thai">Tiếng Thái</option><option value="Indonesian">Tiếng Indonesia</option><option value="Russian">Tiếng Nga</option><option value="Arabic">Tiếng Ả Rập</option></select><span>Dùng để lọc giọng và tạo đúng phát âm</span></label>}
+      {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>SỐ LUỒNG API</small><input type="number" min="1" max="32" value={apiWorkers} onChange={(e)=>setApiWorkers(Math.min(32,Math.max(1,Number(e.target.value)||1)))}/><span>Tối đa request đang xử lý song song</span></label>}
+      {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>DELAY GỬI API · GIÂY</small><input type="number" min="0" max="60" step="0.5" value={apiRequestInterval} onChange={(e)=>{const value=Math.min(60,Math.max(0,Number(e.target.value)||0));setApiRequestInterval(value);localStorage.setItem('hhvietsub.apiRequestInterval',String(value));}}/><span>Khoảng cách giữa hai request: {apiRequestInterval}s{engine==='capcut'&&capcutBackend==='hybrid'?' trên mỗi nguồn':''}</span></label>}
+      {engine==='capcut'&&<label><small>PRESET TẠO NHANH</small><button type="button" className="capcut-fast-preset" onClick={()=>{setCapcutBackend('hybrid');setApiWorkers(8);setApiRequestInterval(2);localStorage.setItem('hhvietsub.apiRequestInterval','2');}}><Zap size={13}/> Bật chế độ nhanh</button><span>2 nguồn · 8 luồng · delay 2 giây mỗi nguồn</span></label>}
       <label><small>TỰ ĐỘNG RETRY LỖI</small><button type="button" onClick={() => setAutoRetry(!autoRetry)} style={{ border: autoRetry ? '1px solid #7edab7' : '1px solid #dfe3f0', borderRadius: 8, padding: '7px 8px', fontSize: 10, fontWeight: 700, cursor: 'pointer', background: autoRetry ? '#ecfbf5' : '#f4f5fa', color: autoRetry ? '#178360' : '#778198', display: 'flex', alignItems: 'center', gap: 5 }}>{autoRetry ? <><RefreshCw size={12} /> Bật (Tối đa 3 lượt)</> : 'Tắt'}</button></label>
     </section>
-    {voiceLibraryOpen && <section className="api-voice-library"><header><div><strong>Thư viện giọng {engine === 'ai33' ? 'AI33' : 'AIMax'}</strong><small>{apiProvider} · {apiVoices.length} giọng</small></div><div className="api-voice-search"><Search size={14}/><input value={voiceQuery} onChange={(e)=>setVoiceQuery(e.target.value)} placeholder="Tìm tên hoặc Voice ID"/></div><button onClick={()=>setVoiceLibraryOpen(false)}><X size={16}/></button></header><div className="api-voice-list">{voiceLibraryLoading ? <div className="api-voice-empty"><RefreshCw className="spin"/> Đang tải thư viện…</div> : apiVoices.filter((v)=>`${v.name} ${v.id}`.toLowerCase().includes(voiceQuery.toLowerCase())).map((voice)=><article key={voice.id} className={apiVoiceId === voice.id ? 'selected' : ''}><div className="api-voice-avatar">{voice.name.slice(0,2).toUpperCase()}</div><div><strong>{voice.name}</strong><small>{voice.language || 'Không rõ ngôn ngữ'} · {voice.id}</small></div><button disabled={!voice.previewUrl} onClick={()=>playApiVoice(voice)} title="Nghe thử"><Play size={14}/></button><button className="choose" onClick={()=>chooseApiVoice(voice)}>Chọn</button></article>)}{!voiceLibraryLoading && !apiVoices.length && <div className="api-voice-empty">Không tìm thấy giọng. Hãy kiểm tra API key và bộ lọc nhà cung cấp.</div>}</div></section>}
-    <div className="srt-output-bar"><div><FolderOpen size={17} /><span><small>THƯ MỤC KẾT QUẢ</small><strong>{outputDir || 'Chọn khi bắt đầu tạo'}</strong></span></div><button onClick={chooseOutput}>Chọn thư mục</button>{outputDir && <button onClick={() => window.desktop?.showInFolder(outputDir)}>Mở kết quả</button>}</div>
+    {voiceLibraryOpen && <section className="api-voice-library"><header><div><strong>Thư viện giọng {engine === 'ai33' ? 'AI33' : engine === 'aimax' ? 'AIMax' : 'CapCut Space'}</strong><small>{engine === 'capcut' ? 'tony2k/ai-voice-studio' : apiProvider} · {apiVoices.length} giọng</small></div><div className="api-voice-search"><Search size={14}/><input value={voiceQuery} onChange={(e)=>setVoiceQuery(e.target.value)} placeholder="Tìm tên hoặc Voice ID"/></div><button onClick={()=>setVoiceLibraryOpen(false)}><X size={16}/></button></header><div className="api-voice-list">{voiceLibraryLoading ? <div className="api-voice-empty"><RefreshCw className="spin"/> Đang tải thư viện…</div> : apiVoices.filter((v)=>`${v.name} ${v.id}`.toLowerCase().includes(voiceQuery.toLowerCase())).map((voice)=><article key={voice.id} className={apiVoiceId === voice.id ? 'selected' : ''}><div className="api-voice-avatar">{voice.name.slice(0,2).toUpperCase()}</div><div><strong>{voice.name}</strong><small>{voice.language || 'Không rõ ngôn ngữ'} · {voice.id}</small></div><button disabled={!voice.previewUrl} onClick={()=>playApiVoice(voice)} title="Nghe thử"><Play size={14}/></button><button className="choose" onClick={()=>chooseApiVoice(voice)}>Chọn</button></article>)}{!voiceLibraryLoading && !apiVoices.length && <div className="api-voice-empty">Không tìm thấy giọng phù hợp hoặc dịch vụ đang tạm ngủ. Hãy thử lại sau.</div>}</div></section>}
     <div className="srt-run-stats"><span>{draft?.rows.length || 0} câu</span><span className="ok">{completed} hoàn thành</span><span className={failed ? 'bad' : ''}>{failed} lỗi</span><div><i style={{ width: `${progress.total ? progress.done / progress.total * 100 : 0}%` }} /></div></div>
     <section className="srt-voice-table"><header><span># / THỜI GIAN</span><span>NỘI DUNG ĐỌC</span><span>TRẠNG THÁI</span><span>THAO TÁC</span></header>{draft?.rows.length ? draft.rows.map((row) => <article key={row.id}><div><b>{String(row.id).padStart(4, '0')}</b><small>{row.start} → {row.end}</small></div><textarea value={row.text} disabled={running} onChange={(e) => updateText(row.id, e.target.value)} /><div className={`voice-row-status ${row.status}`}><strong>{row.status === 'completed' ? 'Hoàn thành' : row.status === 'failed' ? 'Lỗi' : row.status === 'generating' ? 'Đang tạo' : 'Chờ'}</strong><small>{row.duration ? `${row.duration.toFixed(2)} giây` : row.error || `${String(row.id).padStart(4, '0')}.wav`}</small></div><div className="voice-row-actions"><button disabled={!row.file} onClick={() => play(row)} title="Nghe"><Play size={15} /></button><button disabled={running || !row.text.trim()} onClick={() => run(row)} title="Tạo lại"><RefreshCw size={15} /></button></div></article>) : <div className="subtitle-empty"><UploadCloud size={30} /><strong>Chưa có dữ liệu SRT</strong><small>Chọn file ngoài hoặc chuyển bản dịch từ tab Dịch.</small></div>}</section>
-    <footer className="srt-voice-footer"><strong>{message}</strong><span>Retry lỗi: tối đa 2 lần</span></footer>{audioUrl && <audio className="srt-voice-player" src={audioUrl} controls />}{previewUrl && <audio className="api-voice-preview-player" src={previewUrl} controls />}
+    {dictionaryOpen&&<div className="dictionary-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setDictionaryOpen(false)}}><section className="dictionary-modal"><header><div><strong>Từ điển phát âm CapCut</strong><small>Thay từ sai hoặc tiếng Anh bằng cách viết để TTS đọc đúng trước khi tạo MP3.</small></div><button onClick={()=>setDictionaryOpen(false)}><X size={18}/></button></header><div className="dictionary-actions"><button onClick={()=>saveDictionary([...pronunciationDictionary,{id:`dict-${Date.now()}`,source:'',target:''}])}>+ Thêm từ</button><button onClick={()=>dictionaryImportRef.current?.click()}><UploadCloud size={14}/> Nhập JSON</button><button onClick={exportDictionary}><Download size={14}/> Xuất JSON</button><button className="apply" onClick={applyDictionaryToDraft}><Check size={14}/> Áp dụng vào SRT</button><input ref={dictionaryImportRef} type="file" accept=".json,application/json" hidden onChange={(e)=>{void importDictionary(e.target.files?.[0]);e.currentTarget.value=''}}/></div><div className="dictionary-head"><span>TỪ GỐC / TIẾNG ANH</span><span>CÁCH VIẾT ĐỂ ĐỌC</span><span/></div><div className="dictionary-list">{pronunciationDictionary.map((item)=><article key={item.id}><input value={item.source} onChange={(e)=>saveDictionary(pronunciationDictionary.map((row)=>row.id===item.id?{...row,source:e.target.value}:row))} placeholder="Ví dụ: Facebook"/><input value={item.target} onChange={(e)=>saveDictionary(pronunciationDictionary.map((row)=>row.id===item.id?{...row,target:e.target.value}:row))} placeholder="Ví dụ: phây búc"/><button title="Xóa" onClick={()=>saveDictionary(pronunciationDictionary.filter((row)=>row.id!==item.id))}><Trash2 size={15}/></button></article>)}{!pronunciationDictionary.length&&<div className="dictionary-empty">Chưa có quy tắc. Bấm “Thêm từ” hoặc nhập file JSON.</div>}</div><footer><span>{pronunciationDictionary.length} quy tắc · tự động áp dụng khi tạo voice</span><button onClick={()=>setDictionaryOpen(false)}>Đóng</button></footer></section></div>}
+    {jobPickerOpen&&<div className="dictionary-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setJobPickerOpen(false)}}><section className="saved-job-modal"><header><div><strong>Mở job tạo voice đã lưu</strong><small>Chỉ tải job khi bạn chủ động chọn.</small></div><button onClick={()=>setJobPickerOpen(false)}><X size={18}/></button></header><div className="saved-job-picker"><select value={selectedJobId} onChange={(e)=>setSelectedJobId(e.target.value)}><option value="">Chọn job muốn mở…</option>{savedJobs.map((job)=><option key={job.jobId} value={job.jobId}>{job.createdAt||job.jobId} · {job.engine} · {job.completed}/{job.total}{job.failed?` · ${job.failed} lỗi`:''}</option>)}</select>{!savedJobs.length&&<p>Chưa có job nào được lưu.</p>}</div><footer><button onClick={()=>{setSelectedJobId('');setDraft(null);setOutputDir('');setProgress({done:0,total:0});setJobState('idle');setJobPickerOpen(false);setMessage('Đã tạo phiên trống. Hãy chọn file SRT mới.');}}>Job mới</button><button className="primary" disabled={!selectedJobId} onClick={async()=>{await loadSavedJob();setJobPickerOpen(false)}}>Tải job đã chọn</button></footer></section></div>}
+    <footer className="srt-voice-footer"><strong>{message}</strong><span>3 lượt tổng cộng · lượt đầu + tối đa 2 lượt chạy lại câu lỗi</span></footer>{audioUrl && <audio className="srt-voice-player" src={audioUrl} controls />}{previewUrl && <audio className="api-voice-preview-player" src={previewUrl} controls />}
   </div>;
 }
 
@@ -511,6 +650,7 @@ function FfmpegAndCapCutTab() {
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
   const [changePitch, setChangePitch] = useState(false);
   const [videoVolumeDb, setVideoVolumeDb] = useState(-20);
+  const [mergeAudio, setMergeAudio] = useState(true);
   const [progressPercent, setProgressPercent] = useState(0);
   const [jobName, setJobName] = useState(`FFmpeg Sync ${new Date().toLocaleDateString('vi-VN').replaceAll('/', '-')}`);
   const [analysis, setAnalysis] = useState<{subtitles:number;voiceFiles:number;missing:number[];ready:boolean;ffmpegReady:boolean;rawVoiceDuration?:number;totalVoiceDuration?:number}|null>(null);
@@ -574,7 +714,7 @@ function FfmpegAndCapCutTab() {
   const create = async () => {
     if(!window.desktop||!analysis?.ready||!outputDir||running)return;
     setRunning(true);setLogs([]);setResult(null);setProgressPercent(0);setMessage('Đang lập kế hoạch đồng bộ…');
-    try { const value=await window.desktop.request<{projectName:string;projectPath:string;template:string}>('ffmpeg.sync.create',{videoPath,srtPath,voiceDir,outputDir,projectName:jobName,chunkPieces:20,encoder,voiceSpeed,changePitch,videoVolumeDb}); setResult(value);setProgressPercent(100);setMessage(`Hoàn tất: ${value.projectName}`); }
+    try { const value=await window.desktop.request<{projectName:string;projectPath:string;template:string}>('ffmpeg.sync.create',{videoPath,srtPath,voiceDir,outputDir,projectName:jobName,chunkPieces:12,encoder,voiceSpeed,changePitch,videoVolumeDb,mergeAudio}); setResult(value);setProgressPercent(100);setMessage(`Hoàn tất: ${value.projectName}`); }
     catch(error){setMessage(error instanceof Error?error.message:String(error));} finally{setRunning(false);}
   };
   return <div className="capcut-project-page" style={{ paddingTop: '10px' }}>
@@ -628,6 +768,7 @@ function FfmpegAndCapCutTab() {
 
       <div className="capcut-panel-card">
         <div className="panel-card-title"><Zap size={15}/> <span>CẤU HÌNH XUẤT</span></div>
+        <label className={`merge-audio-toggle ${mergeAudio?'active':''}`}><input type="checkbox" checked={mergeAudio} onChange={(e)=>setMergeAudio(e.target.checked)}/><span><strong>{mergeAudio?'Có ghép video với audio':'Không ghép audio'}</strong><small>{mergeAudio?'Xuất thêm MP4 hoàn chỉnh có voice.':'Chỉ giữ 3 file: SRT, master voice và video-synced.mp4.'}</small></span></label>
         <div className="panel-card-grid-2">
           <label><small>TÊN KẾT QUẢ</small><input value={jobName} onChange={(e)=>setJobName(e.target.value)}/></label>
           <label><small>BỘ MÃ HÓA VIDEO</small><select value={encoder} onChange={(e)=>setEncoder(e.target.value)}><option value="auto">Tự động (GPU tốt nhất)</option><option value="nvenc">NVIDIA NVENC</option><option value="amf">AMD AMF</option><option value="qsv">Intel QSV</option><option value="x264">CPU (libx264)</option></select></label>

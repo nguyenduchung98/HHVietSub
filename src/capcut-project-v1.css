@@ -37,3 +37,4 @@
   .capcut-settings-row { grid-template-columns: 1fr; }
   .panel-card-grid-3 { grid-template-columns: 1fr; }
 }
+.merge-audio-toggle{display:flex!important;grid-template-columns:auto 1fr!important;align-items:center;gap:10px;border:1px solid #dfe4f1;border-radius:11px;background:#f8f9fd;padding:10px 11px;margin-bottom:3px;cursor:pointer}.merge-audio-toggle.active{background:#f1fbf7;border-color:#bfe8d9}.merge-audio-toggle input{width:16px;height:16px;accent-color:#7057ed}.merge-audio-toggle span{display:grid;gap:3px}.merge-audio-toggle strong{font-size:10px;color:#303a55}.merge-audio-toggle small{font-size:8px!important;font-weight:500!important;color:#8b94a8!important}

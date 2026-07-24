@@ -1,6 +1,7 @@
 import tempfile
 import threading
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -40,6 +41,34 @@ class TestTtsApiService(unittest.TestCase):
             result = self.service.list_voices("ai33", "edge", "vi")
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["voices"][0]["name"], "Voice One")
+
+    def test_capcut_direct_voice_mapping_needs_no_api_key(self):
+        result = self.service.list_voices("capcut", language="Vietnamese")
+        self.assertGreaterEqual(result["total"], 1)
+        self.assertTrue(any(
+            voice["id"] == "BV074_streaming::7102355709945188865"
+            for voice in result["voices"]
+        ))
+        self.assertEqual(result["provider"], "capcut-direct")
+
+    def test_capcut_direct_generates_mp3_without_conversion(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
+            def read(self): return b"ID3" + b"\0" * 256
+
+        destination = Path(self.temporary.name) / "0001.mp3"
+        with patch("backend.services.tts_api_service.capcut_synthesize", return_value="https://cdn.example/audio.mp3") as request, \
+             patch("backend.services.tts_api_service.urllib.request.urlopen", return_value=Response()):
+            result = self.service.generate_one(
+                "capcut", {"id": 1, "text": "Xin chào"},
+                {"apiVoiceId": "BV074_streaming::7102355709945188865", "speed": 1.1},
+                destination,
+            )
+        self.assertEqual(result["format"], "mp3")
+        self.assertTrue(destination.is_file())
+        self.assertEqual(request.call_args.args[1], "BV074_streaming")
+        self.assertEqual(request.call_args.args[2], "7102355709945188865")
 
     def test_generate_one_rotates_keys_by_entry_id(self):
         calls = []

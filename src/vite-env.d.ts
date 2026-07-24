@@ -4,6 +4,7 @@ interface Window {
   desktop?: {
     request: <T = unknown>(method: string, params?: unknown) => Promise<T>;
     selectFile: (options?: unknown) => Promise<string | null>;
+    listSrtFiles: (folderPath: string) => Promise<{ folder: string; files: string[] }>;
     selectFolder: () => Promise<string | null>;
     readText: (filePath: string) => Promise<string>;
     readAudio: (filePath: string) => Promise<string>;

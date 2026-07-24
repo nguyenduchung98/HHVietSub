@@ -216,7 +216,7 @@ def _encoder(ffmpeg: str, preferred: str = "auto") -> list[str]:
                 if probe.returncode == 0:
                     return ["-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "23"]
 
-    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-threads", "4"]
 
 
 def _has_audio(ffprobe: str, path: Path) -> bool:
@@ -263,6 +263,7 @@ def _render_group_piecewise(
     part_paths: list[Path] = []
     try:
         for index, piece in enumerate(group, 1):
+            _safe_log(log, f"Chế độ an toàn: đang render đoạn {index}/{len(group)} của cụm {chunk.stem.replace('chunk-', '')}")
             source_start = float(piece["sourceStart"])
             source_duration = max(0.001, float(piece["source"]))
             target_duration = max(0.001, float(piece["target"]))
@@ -282,6 +283,7 @@ def _render_group_piecewise(
                 )
             command = [
                 ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                "-filter_complex_threads", "1",
                 "-ss", f"{source_start:.6f}", "-t", f"{source_duration + 0.5:.6f}",
                 "-i", str(video), "-filter_complex", ";".join(filters),
                 "-map", "[vout]", *encoder,
@@ -293,10 +295,10 @@ def _render_group_piecewise(
         concat_list.write_text("\n".join(f"file '{str(path).replace(chr(39), chr(39)*2)}'" for path in part_paths), encoding="utf-8")
         _run([
             ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
-            "-i", str(concat_list), "-t", f"{expected_duration:.6f}", *encoder,
-            *(["-c:a", "aac", "-b:a", "192k"] if keep_original_audio else ["-an"]),
+            "-i", str(concat_list), "-c", "copy",
+            *([] if keep_original_audio else ["-an"]),
             "-movflags", "+faststart", str(chunk),
-        ], "Không nối được các đoạn dự phòng", timeout=120)
+        ], "Không nối được các đoạn dự phòng", timeout=90)
         if not _valid_media(ffprobe, chunk, require_audio=keep_original_audio, expected_duration=expected_duration):
             raise RuntimeError("Chunk dự phòng hoàn tất nhưng thời lượng không hợp lệ")
     finally:
@@ -407,7 +409,8 @@ def _cleanup_success_artifacts(chunks_dir: Path, concat_file: Path, plan_path: P
 
 def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
            logger: Callable[[str], None] | None = None, chunk_pieces: int = 100, encoder_choice: str = "auto",
-           voice_speed: float = 1.0, change_pitch: bool = False, video_volume_db: float = -20.0) -> dict[str, Any]:
+           voice_speed: float = 1.0, change_pitch: bool = False, video_volume_db: float = -20.0,
+           merge_audio: bool = True) -> dict[str, Any]:
     log = logger or (lambda _message: None)
     video, srt, voice_dir, output_dir = video.resolve(), srt.resolve(), voice_dir.resolve(), output_dir.resolve()
     ffmpeg, ffprobe = find_tools()
@@ -485,11 +488,16 @@ def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
     _safe_log(log, f"Đang ghép master voice (hỗ trợ MP3/WAV/FLAC/M4A) với tốc độ {voice_speed:.2f}x (Cao độ: {'thay đổi' if change_pitch else 'giữ nguyên'})…")
     _write_master_timeline(ffmpeg, master_voice, updated, target_cursor, voice_speed=voice_speed, change_pitch=change_pitch)
 
-    effective_chunk_pieces = min(20, max(10, chunk_pieces))
+    # Pieces are rendered sequentially, so a larger group no longer increases
+    # filter RAM. Twelve pieces reduces concat/container overhead while keeping
+    # cache checkpoints reasonably frequent.
+    effective_chunk_pieces = min(12, max(2, chunk_pieces))
     groups = [pieces[i:i + effective_chunk_pieces] for i in range(0, len(pieces), effective_chunk_pieces)]
     encoder = _encoder(ffmpeg, encoder_choice)
     chunk_paths: list[Path] = []
-    piecewise_mode = False
+    # Always use the bounded one-piece pipeline. The former split/asplit graph
+    # could buffer enough decoded HD frames to exhaust 32 GB RAM.
+    piecewise_mode = True
     for group_index, group in enumerate(groups, 1):
         chunk = chunks_dir / f"chunk-{group_index:04d}.mp4"; chunk_paths.append(chunk)
         signature_path = chunk.with_suffix(".signature")
@@ -546,7 +554,10 @@ def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
         }
         _safe_log(log, json.dumps(progress_info, ensure_ascii=False))
         
-        command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{source_start:.6f}", "-t", f"{source_end-source_start:.6f}", "-i", str(video), "-filter_complex_script", str(script), "-map", "[vout]", *encoder]
+        command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                   "-filter_complex_threads", "2", "-ss", f"{source_start:.6f}",
+                   "-t", f"{source_end-source_start:.6f}", "-i", str(video),
+                   "-filter_complex_script", str(script), "-map", "[vout]", *encoder]
         command += ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"] if keep_original_audio else ["-an"]
         command += ["-t", f"{expected_group_duration:.6f}"]
         command.append(str(chunk))
@@ -579,6 +590,17 @@ def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
             f"(video {joined_duration:.3f}s, kế hoạch {target_cursor:.3f}s). "
             "Không xuất file để tránh lệch voice/phụ đề."
         )
+    if not merge_audio:
+        (target / f"{safe_name}.mp4").unlink(missing_ok=True)
+        _cleanup_success_artifacts(chunks_dir, concat_file, plan_path, log)
+        _safe_log(log, "Hoàn tất bộ 3 file rời: video đồng bộ, phụ đề và master voice.")
+        return {
+            "projectName": safe_name, "projectPath": str(target), "outputDir": str(target),
+            "template": f"FFmpeg · bộ 3 file rời · voice {voice_speed:.2f}x",
+            "subtitles": len(cues), "pieces": len(pieces),
+            "videoPath": str(joined_video), "subtitlePath": str(output_srt),
+            "voicePath": str(master_voice), "merged": False,
+        }
     final_path = target / f"{safe_name}.mp4"
     if keep_original_audio and video_volume_db > -35:
         _safe_log(log, f"Đang trộn voice với âm thanh video gốc ở {video_volume_db:.0f} dB…")

@@ -234,6 +234,19 @@ app.whenReady().then(async () => {
     if (!result.canceled && result.filePaths[0]) grantPath(result.filePaths[0]);
     return result.canceled ? null : result.filePaths[0];
   });
+  ipcMain.handle('folder:srt-files', async (event, requestedFolder: string) => {
+    assertTrustedSender(event);
+    const folder = assertGrantedPath(requestedFolder);
+    const metadata = await fs.stat(folder);
+    if (!metadata.isDirectory()) throw new Error('Đường dẫn đã chọn không phải thư mục');
+    const entries = await fs.readdir(folder, { withFileTypes: true });
+    const files = entries
+      .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === '.srt')
+      .map((entry) => path.join(folder, entry.name))
+      .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
+    files.forEach(grantPath);
+    return { folder, files };
+  });
   ipcMain.handle('file:text-data', async (event, filePath: string) => {
     assertTrustedSender(event);
     const safePath = assertGrantedPath(filePath);

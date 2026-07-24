@@ -44,6 +44,15 @@ npm run dev
 
 Chạy `setup_vieneu_backend.bat` để cài VieNeu-TTS vào `runtime/VieNeu-TTS`. Chạy `setup_ffmpeg.bat` để kiểm tra hoặc cài FFmpeg trên Windows.
 
+### CapCut TTS qua Hugging Face Space
+
+Hàng chờ Voice SRT có engine `CapCut TTS · HF Space`, kết nối dịch vụ công khai
+[`tony2k/ai-voice-studio`](https://huggingface.co/spaces/tony2k/ai-voice-studio).
+Tool lấy thư viện giọng từ `/api/voices`, tạo giọng qua `/api/tts`, rồi tải và
+chuẩn hóa kết quả thành WAV. Đây là dịch vụ từ xa của bên thứ ba: nội dung phụ đề
+được gửi tới Space và dịch vụ CapCut phía sau, độ sẵn sàng không được bảo đảm,
+vì vậy không nên dùng cho nội dung bí mật.
+
 ## Kiểm tra
 
 ```powershell

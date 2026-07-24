@@ -393,30 +393,38 @@ class Worker:
         requested_workers = max(1, int(params.get("apiWorkers", 3)))
         workers = min(32, requested_workers)
         request_interval = max(0.0, min(60.0, float(params.get("apiRequestInterval", 10))))
-        request_gate = threading.Lock()
-        next_request_at = [0.0]
+        request_gate = {"default": threading.Lock(), "direct": threading.Lock(), "space": threading.Lock()}
+        next_request_at = {"default": 0.0, "direct": 0.0, "space": 0.0}
         items = []; pending: list[tuple[dict[str, Any], Path]] = []
         job_id = str(params.get("jobId") or f"srt-{int(time.time()*1000)}")
         control = self.srt_jobs.register(job_id)
         for position, raw in enumerate(entries, 1):
             if not isinstance(raw, dict) or not str(raw.get("text", "")).strip(): continue
-            entry = {**raw, "id": int(raw.get("id", position)), "text": str(raw["text"]).strip()}; output = output_dir / f"{entry['id']:04d}.wav"
+            entry = {**raw, "id": int(raw.get("id", position)), "text": str(raw["text"]).strip()}
+            output = output_dir / f"{entry['id']:04d}.{'mp3' if engine == 'capcut' else 'wav'}"
             if bool(params.get("skipExisting", True)) and output.is_file():
-                with wave.open(str(output), "rb") as wav: duration = wav.getnframes() / max(1, wav.getframerate())
+                if engine == "capcut":
+                    duration = 0
+                else:
+                    with wave.open(str(output), "rb") as wav:
+                        duration = wav.getnframes() / max(1, wav.getframerate())
                 items.append({**entry, "status": "completed", "file": str(output), "duration": round(duration, 2), "skipped": True})
             else: pending.append((entry, output))
 
         def wait_for_api_slot(entry: dict[str, Any]) -> bool:
             """Space API starts apart while allowing in-flight work to overlap."""
-            with request_gate:
+            lane = "default"
+            if engine == "capcut" and str(params.get("capcutBackend", "")).lower() == "hybrid":
+                lane = "direct" if int(entry.get("id", 1)) % 2 else "space"
+            with request_gate[lane]:
                 while True:
                     while control["pause"].is_set() and not control["cancel"].is_set():
                         time.sleep(.2)
                     if control["cancel"].is_set():
                         return False
-                    remaining = next_request_at[0] - time.monotonic()
+                    remaining = next_request_at[lane] - time.monotonic()
                     if remaining <= 0:
-                        next_request_at[0] = time.monotonic() + request_interval
+                        next_request_at[lane] = time.monotonic() + request_interval
                         emit({"event": "srt.voice.progress", "data": {
                             "event": "api-start", "id": entry["id"],
                             "requestInterval": request_interval,
@@ -556,12 +564,13 @@ class Worker:
             voice_speed = float(params.get("voiceSpeed", 1.0))
             change_pitch = bool(params.get("changePitch", False))
             video_volume_db = float(params.get("videoVolumeDb", -20.0))
+            merge_audio = bool(params.get("mergeAudio", True))
             return render(Path(str(params.get("videoPath", ""))), Path(str(params.get("srtPath", ""))),
                           Path(str(params.get("voiceDir", ""))), output_dir,
                           str(params.get("projectName", "")), logger,
                           int(params.get("chunkPieces", 100)), encoder_choice=encoder,
                           voice_speed=voice_speed, change_pitch=change_pitch,
-                          video_volume_db=video_volume_db)
+                          video_volume_db=video_volume_db, merge_audio=merge_audio)
         finally:
             self.ffmpeg_sync_lock.release()
 
@@ -632,7 +641,7 @@ class Worker:
         voice_id = str(params.get("voiceId", "")).strip()
         if not isinstance(entries, list) or not entries:
             raise ValueError("Không có câu phụ đề để tạo giọng")
-        if engine in {"ai33", "aimax"}:
+        if engine in {"ai33", "aimax", "capcut"}:
             job_params = {**params, "jobId": str(params.get("jobId") or f"srt-{int(time.time() * 1000)}")}
             try:
                 return self._srt_api_generate(engine, job_params, entries)
