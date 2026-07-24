@@ -1,0 +1,97 @@
+.ui-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 700;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.ui-button:hover:not(:disabled) { transform: translateY(-1px); }
+.ui-button:focus-visible, .ui-input:focus-visible, .ui-select:focus-visible, .ui-segmented button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  outline-offset: 2px;
+}
+.ui-button:disabled { opacity: .52; }
+.ui-button--primary { color: white; background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 25%, transparent); }
+.ui-button--secondary { color: var(--text); background: var(--surface); border-color: var(--border); box-shadow: var(--shadow-sm); }
+.ui-button--ghost { color: var(--text-muted); background: transparent; }
+.ui-button--danger { color: white; background: var(--danger); }
+
+.ui-spinner {
+  width: var(--spinner-size);
+  height: var(--spinner-size);
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ui-spin .7s linear infinite;
+}
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+
+.ui-field { display: grid; gap: var(--space-2); min-width: 0; color: var(--text); }
+.ui-field__label { font-size: 13px; font-weight: 700; }
+.ui-field__hint, .ui-field__error { font-size: 12px; line-height: 1.4; }
+.ui-field__hint { color: var(--text-muted); }
+.ui-field__error { color: var(--danger); }
+.ui-input, .ui-select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  color: var(--text);
+  background: var(--surface);
+}
+.ui-input[aria-invalid="true"] { border-color: var(--danger); }
+.ui-input::placeholder { color: var(--text-muted); opacity: .72; }
+
+.ui-segmented { display: flex; gap: var(--space-1); padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-muted); }
+.ui-segmented button { min-height: 34px; flex: 1; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-sm); color: var(--text-muted); background: transparent; font-size: 13px; font-weight: 700; }
+.ui-segmented button.active { color: var(--accent); background: var(--surface); box-shadow: var(--shadow-sm); }
+.ui-segmented button:disabled { opacity: .45; }
+
+.ui-slider__head, .ui-progress__head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }
+.ui-slider output { color: var(--accent); font-size: 13px; font-weight: 800; }
+.ui-slider input { width: 100%; accent-color: var(--accent); }
+
+.ui-card { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-sm); }
+.ui-card__header { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); border-bottom: 1px solid var(--border); }
+.ui-card__icon { width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 auto; border-radius: var(--radius-sm); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.ui-card__heading { min-width: 0; flex: 1; }
+.ui-card__heading h2 { margin: 0; color: var(--text); font-size: 16px; line-height: 1.3; }
+.ui-card__heading p { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.ui-card__body { padding: var(--space-4); }
+
+.ui-badge { width: max-content; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.ui-badge i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.ui-badge--pending { color: var(--text-muted); background: var(--surface-muted); }
+.ui-badge--running { color: #a46300; background: color-mix(in srgb, var(--warning) 14%, var(--surface)); }
+.ui-badge--done { color: #12843b; background: color-mix(in srgb, var(--success) 13%, var(--surface)); }
+.ui-badge--error { color: #c92d2d; background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
+
+.ui-progress { display: grid; gap: var(--space-2); }
+.ui-progress__head { color: var(--text-muted); font-size: 12px; }
+.ui-progress__head strong { color: var(--text); }
+.ui-progress__track { height: 8px; overflow: hidden; border-radius: 999px; background: var(--surface-muted); }
+.ui-progress__track span { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 220ms ease; }
+
+.ui-toast-region { position: fixed; top: var(--space-4); right: var(--space-4); z-index: 10000; width: min(380px, calc(100vw - 32px)); display: grid; gap: var(--space-2); pointer-events: none; }
+.ui-toast { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); background: var(--surface); box-shadow: var(--shadow-lg); pointer-events: auto; animation: ui-toast-in 180ms ease-out; }
+.ui-toast > i { width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: currentColor; }
+.ui-toast strong { font-size: 13px; }
+.ui-toast p { margin: 3px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.ui-toast button { padding: 0; border: 0; color: var(--text-muted); background: transparent; font-size: 20px; line-height: 1; }
+.ui-toast--success { color: var(--success); }
+.ui-toast--error { color: var(--danger); }
+.ui-toast--info { color: var(--accent); }
+@keyframes ui-toast-in { from { opacity: 0; transform: translateY(-8px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-button, .ui-progress__track span, .ui-toast { transition: none; animation: none; }
+}
