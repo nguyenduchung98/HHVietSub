@@ -1,17 +1,22 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
-import { ComponentPreview } from './components/ComponentPreview';
 import { ToastProvider } from './components/ui';
 import './theme/tokens.css';
 import './theme/base.css';
 import './styles.css';
-import './translate.css';
-import './translate-extra.css';
-import './studio-extra.css';
 
-const isComponentPreview = new URLSearchParams(window.location.search).get('ui-preview') === '1';
+const root = ReactDOM.createRoot(document.getElementById('root')!);
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>{isComponentPreview ? <ComponentPreview /> : <ToastProvider><App /></ToastProvider>}</React.StrictMode>,
-);
+const render = async () => {
+  const isComponentPreview = import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get('ui-preview') === '1';
+  if (isComponentPreview) {
+    const { ComponentPreview } = await import('./components/ComponentPreview');
+    root.render(<React.StrictMode><ComponentPreview /></React.StrictMode>);
+    return;
+  }
+  root.render(<React.StrictMode><ToastProvider><App /></ToastProvider></React.StrictMode>);
+};
+
+void render();

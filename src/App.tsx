@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import './studio-v2.css';
 import './focused-workspace.css';
 import './srt-voice-v1.css';
 import './capcut-project-v1.css';
@@ -8,7 +7,7 @@ import './shell-v3.css';
 import './sync-phase5.css';
 import './phase6.css';
 import { useToast } from './components/ui';
-import { AudioLines, Captions, Check, ChevronDown, CircleHelp, Clapperboard, Download, FileText, FolderOpen, Languages, Moon, Pause, Play, RefreshCw, Search, Settings2, Sliders, Sparkles, Square, Sun, Trash2, UploadCloud, X, Zap } from 'lucide-react';
+import { AudioLines, Captions, Check, ChevronDown, CircleHelp, Clapperboard, Download, FileText, FolderOpen, Moon, Pause, Play, RefreshCw, Search, Settings2, Sliders, Sparkles, Square, Sun, Trash2, UploadCloud, X, Zap } from 'lucide-react';
 
 type Page = 'srt' | 'capcut';
 type SrtVoiceRow = { id: number; start: string; end: string; text: string; status: 'pending' | 'generating' | 'completed' | 'failed'; duration?: number; file?: string; error?: string };
@@ -62,8 +61,6 @@ export function App() {
     if (saved === 'light' || saved === 'dark') return saved;
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
-  const [uiLanguage, setUiLanguage] = useState('vi');
-  const srtDraft: SrtDraft | null = null;
 
   useEffect(() => {
     if (!window.desktop) return;
@@ -79,21 +76,19 @@ export function App() {
     localStorage.setItem('hhvietsub.theme', theme);
   }, [theme]);
 
-  const focusedWorkspace = true;
   return <div className="app-shell focused-workspace lite-shell">
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><AudioLines size={23} /></div><div><strong>HHVietSub Lite</strong><span>CapCut Voice & Sync</span></div></div>
       <nav className="nav-pills">{nav.map((item) => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => setPage(item.id)}><item.icon size={15} />{item.label}</button>)}</nav>
       <div className="top-actions">
         <span className={`backend-state ${online ? 'online' : ''}`}><i />{online ? 'Backend sẵn sàng' : 'Backend chưa sẵn sàng'}</span>
-        <label className="ui-language-picker" title="Ngôn ngữ giao diện"><Languages size={16}/><select aria-label="Ngôn ngữ giao diện" value={uiLanguage} onChange={(event) => setUiLanguage(event.target.value)}><option value="vi">VI</option></select></label>
         <button className="theme-toggle" type="button" title={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'} aria-label={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'} onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</button>
       </div>
     </header>
 
     <main className="workspace">
       <div className="workspace-view" style={{ display: page === 'srt' ? 'block' : 'none' }}>
-        <SrtVoicePage initialDraft={srtDraft} />
+        <SrtVoicePage />
       </div>
       <div className="workspace-view" style={{ display: page === 'capcut' ? 'block' : 'none' }}>
         <CapCutProjectPage />
@@ -103,7 +98,7 @@ export function App() {
   </div>;
 }
 
-function SrtVoicePage({ initialDraft }: { initialDraft: SrtDraft | null }) {
+function SrtVoicePage() {
   const { showToast } = useToast();
   const initialVoicePreset = useMemo(() => readVoicePreset(), []);
   const [engine, setEngine] = useState<VoiceEngine>(() => liteVoiceEngine(initialVoicePreset?.engine));
@@ -121,7 +116,7 @@ function SrtVoicePage({ initialDraft }: { initialDraft: SrtDraft | null }) {
   const [voiceLibraryLoading, setVoiceLibraryLoading] = useState(false);
   const [voiceQuery, setVoiceQuery] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
-  const [draft, setDraft] = useState<SrtDraft | null>(initialDraft);
+  const [draft, setDraft] = useState<SrtDraft | null>(null);
   const [outputDir, setOutputDir] = useState('');
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState('Chọn file SRT ở panel bên trái để bắt đầu.');
@@ -217,7 +212,6 @@ function SrtVoicePage({ initialDraft }: { initialDraft: SrtDraft | null }) {
       saveDictionary(items); setMessage(`Đã nhập ${items.length} mục từ điển phát âm.`);
     } catch(error) { setMessage(`Không thể nhập từ điển: ${error instanceof Error?error.message:String(error)}`); }
   };
-  useEffect(() => { if (initialDraft) { setDraft(initialDraft); setMessage(`Đã nhận ${initialDraft.rows.length} câu từ tab Dịch.`); } }, [initialDraft]);
   useEffect(() => { void loadApiKeyStatus().catch(() => undefined); }, []);
   useEffect(() => {
     if (!voiceLibraryOpen) return;
