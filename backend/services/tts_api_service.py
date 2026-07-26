@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -223,7 +224,9 @@ class TtsApiService:
         if audio[:4] == b"RIFF":
             destination.write_bytes(audio)
         else:
-            ffmpeg = shutil.which("ffmpeg")
+            app_root = Path(os.environ.get("HHVIETSUB_APP_ROOT", "")).expanduser()
+            bundled_ffmpeg = app_root / "vendor" / "ffmpeg" / "ffmpeg.exe"
+            ffmpeg = str(bundled_ffmpeg) if bundled_ffmpeg.is_file() else shutil.which("ffmpeg")
             if not ffmpeg:
                 try:
                     import imageio_ffmpeg

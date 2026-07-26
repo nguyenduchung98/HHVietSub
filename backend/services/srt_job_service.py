@@ -69,7 +69,7 @@ class SrtJobService:
                 jobs.append({
                     "jobId": value.get("jobId", path.stem),
                     "state": value.get("state", "unknown"),
-                    "engine": value.get("engine", "omnivoice"),
+                    "engine": value.get("engine", "capcut"),
                     "voiceId": value.get("voiceId", ""),
                     "outputDir": value.get("outputDir", ""),
                     "createdAt": value.get("createdAt", ""),

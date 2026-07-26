@@ -72,12 +72,16 @@ class Worker:
 
 
 
-    def project_list(self, _params: dict[str, Any]) -> list[dict[str, str]]:
-        try:
-            from backend.engines.capcut_project_v1 import project_root
-            root = project_root()
-        except (OSError, RuntimeError, ValueError, ImportError):
-            return []
+    def project_list(self, params: dict[str, Any]) -> list[dict[str, str]]:
+        selected_root = Path(str(params.get("rootPath", ""))).expanduser()
+        if selected_root.is_dir():
+            root = selected_root.resolve()
+        else:
+            try:
+                from backend.engines.capcut_project_v1 import project_root
+                root = project_root()
+            except (OSError, RuntimeError, ValueError, ImportError):
+                return []
         result: list[dict[str, str]] = []
         projects: list[tuple[float, Path]] = []
         for child in root.iterdir():
@@ -285,13 +289,15 @@ class Worker:
             voice_speed = float(params.get("voiceSpeed", 1.0))
             change_pitch = bool(params.get("changePitch", False))
             video_volume_db = float(params.get("videoVolumeDb", -20.0))
+            render_profile = str(params.get("renderProfile", "balanced"))
             merge_audio = False
             return render(Path(str(params.get("videoPath", ""))), Path(str(params.get("srtPath", ""))),
                           Path(str(params.get("voiceDir", ""))), output_dir,
                           str(params.get("projectName", "")), logger,
                           int(params.get("chunkPieces", 100)), encoder_choice=encoder,
                           voice_speed=voice_speed, change_pitch=change_pitch,
-                          video_volume_db=video_volume_db, merge_audio=merge_audio)
+                          video_volume_db=video_volume_db, merge_audio=merge_audio,
+                          render_profile=render_profile)
         finally:
             self.ffmpeg_sync_lock.release()
 

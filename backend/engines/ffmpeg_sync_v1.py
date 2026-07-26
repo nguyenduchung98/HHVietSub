@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -108,6 +109,20 @@ def _probe_duration(ffprobe: str, path: Path) -> float:
     return float(result.stdout.strip())
 
 
+def _video_duration(ffprobe: str, path: Path) -> float:
+    result = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration",
+         "-of", "default=nw=1:nk=1", str(path)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode == 0:
+        value = result.stdout.strip().splitlines()
+        if value and value[0] not in {"", "N/A"}:
+            return float(value[0])
+    return _probe_duration(ffprobe, path)
+
+
 def _audio_duration(ffprobe: str, path: Path) -> float:
     if path.suffix.lower() == ".wav":
         try:
@@ -119,6 +134,13 @@ def _audio_duration(ffprobe: str, path: Path) -> float:
 
 
 def find_tools() -> tuple[str, str]:
+    app_root = Path(os.environ.get("HHVIETSUB_APP_ROOT", "")).expanduser()
+    bundled = app_root / "vendor" / "ffmpeg"
+    bundled_ffmpeg = bundled / "ffmpeg.exe"
+    bundled_ffprobe = bundled / "ffprobe.exe"
+    if bundled_ffmpeg.is_file() and bundled_ffprobe.is_file():
+        return str(bundled_ffmpeg), str(bundled_ffprobe)
+
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
     if not ffmpeg or not ffprobe:
@@ -184,7 +206,11 @@ def _run(command: list[str], description: str, timeout: float | None = None) -> 
         raise RuntimeError(f"{description}: {(result.stderr or result.stdout)[-1600:]}")
 
 
-def _encoder(ffmpeg: str, preferred: str = "auto") -> list[str]:
+def _encoder(
+    ffmpeg: str,
+    preferred: str = "auto",
+    logger: Callable[[str], None] | None = None,
+) -> list[str]:
     result = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     encoders_out = result.stdout.lower()
 
@@ -206,16 +232,23 @@ def _encoder(ffmpeg: str, preferred: str = "auto") -> list[str]:
             if enc == "h264_nvenc":
                 probe = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=size=256x256:duration=0.1", "-c:v", "h264_nvenc", "-f", "null", "-"], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 if probe.returncode == 0:
+                    _safe_log(logger, "Bộ mã hóa đang dùng: NVIDIA NVENC (GPU)")
                     return ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
             elif enc == "h264_amf":
                 probe = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=size=256x256:duration=0.1", "-c:v", "h264_amf", "-f", "null", "-"], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 if probe.returncode == 0:
+                    _safe_log(logger, "Bộ mã hóa đang dùng: AMD AMF (GPU)")
                     return ["-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_p", "23", "-qp_i", "23"]
             elif enc == "h264_qsv":
                 probe = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=size=256x256:duration=0.1", "-c:v", "h264_qsv", "-f", "null", "-"], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 if probe.returncode == 0:
+                    _safe_log(logger, "Bộ mã hóa đang dùng: Intel Quick Sync (GPU)")
                     return ["-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "23"]
 
+    if pref not in ("x264", "libx264", "cpu"):
+        _safe_log(logger, f"Không khởi tạo được GPU encoder ({preferred}); tự chuyển sang CPU libx264.")
+    else:
+        _safe_log(logger, "Bộ mã hóa đang dùng: CPU libx264")
     return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-threads", "4"]
 
 
@@ -322,14 +355,15 @@ def _valid_media(ffprobe: str, path: Path, require_audio: bool = False,
     return True
 
 
-def _group_signature(video: Path, group: list[dict[str, Any]], keep_original_audio: bool) -> str:
+def _group_signature(video: Path, group: list[dict[str, Any]], keep_original_audio: bool, pipeline: str = "") -> str:
     stat = video.stat()
     payload = {
-        "version": 5,
+        "version": 6,
         "video": str(video),
         "videoSize": stat.st_size,
         "videoModifiedNs": stat.st_mtime_ns,
         "originalAudio": keep_original_audio,
+        "pipeline": pipeline,
         "pieces": group,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -410,7 +444,7 @@ def _cleanup_success_artifacts(chunks_dir: Path, concat_file: Path, plan_path: P
 def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
            logger: Callable[[str], None] | None = None, chunk_pieces: int = 100, encoder_choice: str = "auto",
            voice_speed: float = 1.0, change_pitch: bool = False, video_volume_db: float = -20.0,
-           merge_audio: bool = True) -> dict[str, Any]:
+           merge_audio: bool = True, render_profile: str = "balanced") -> dict[str, Any]:
     log = logger or (lambda _message: None)
     video, srt, voice_dir, output_dir = video.resolve(), srt.resolve(), voice_dir.resolve(), output_dir.resolve()
     ffmpeg, ffprobe = find_tools()
@@ -488,20 +522,24 @@ def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
     _safe_log(log, f"Đang ghép master voice (hỗ trợ MP3/WAV/FLAC/M4A) với tốc độ {voice_speed:.2f}x (Cao độ: {'thay đổi' if change_pitch else 'giữ nguyên'})…")
     _write_master_timeline(ffmpeg, master_voice, updated, target_cursor, voice_speed=voice_speed, change_pitch=change_pitch)
 
-    # Pieces are rendered sequentially, so a larger group no longer increases
-    # filter RAM. Twelve pieces reduces concat/container overhead while keeping
-    # cache checkpoints reasonably frequent.
-    effective_chunk_pieces = min(24, max(2, chunk_pieces))
+    safe_piecewise = render_profile == "weak"
+    effective_chunk_pieces = 6 if safe_piecewise else min(20, max(10, chunk_pieces))
     groups = [pieces[i:i + effective_chunk_pieces] for i in range(0, len(pieces), effective_chunk_pieces)]
-    encoder = _encoder(ffmpeg, encoder_choice)
+    encoder = _encoder(ffmpeg, encoder_choice, log)
     chunk_paths: list[Path] = []
-    # Always use the bounded one-piece pipeline. The former split/asplit graph
-    # could buffer enough decoded HD frames to exhaust 32 GB RAM.
-    piecewise_mode = True
+    _safe_log(
+        log,
+        "Chế độ render: từng đoạn an toàn (máy yếu)"
+        if safe_piecewise else
+        f"Chế độ render: cả cụm {effective_chunk_pieces} đoạn (pipeline FFmpeg-Test)",
+    )
     for group_index, group in enumerate(groups, 1):
         chunk = chunks_dir / f"chunk-{group_index:04d}.mp4"; chunk_paths.append(chunk)
         signature_path = chunk.with_suffix(".signature")
-        expected_signature = _group_signature(video, group, keep_original_audio)
+        expected_signature = _group_signature(
+            video, group, keep_original_audio,
+            f"{render_profile}:{encoder[1] if len(encoder) > 1 else encoder_choice}",
+        )
         expected_group_duration = sum(float(piece["target"]) for piece in group)
         cached_signature = signature_path.read_text(encoding="ascii", errors="ignore").strip() if signature_path.is_file() else ""
         media_is_valid = _valid_media(
@@ -511,7 +549,6 @@ def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
         if (cached_signature == expected_signature or not cached_signature) and media_is_valid:
             if not cached_signature:
                 signature_path.write_text(expected_signature, encoding="ascii")
-                piecewise_mode = True
                 _safe_log(log, f"Đã phục hồi cache hợp lệ cho cụm {group_index}")
             _safe_log(log, f"Bỏ qua cụm {group_index}/{len(groups)} đã hoàn thành")
             continue
@@ -528,14 +565,7 @@ def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
             filters.append(f"[vsrc{index}]trim=start={local_start:.6f}:end={local_end:.6f},setpts=(PTS-STARTPTS)*{factor:.9f}[v{index}]")
             if keep_original_audio:
                 tempo = piece["source"] / max(piece["target"], 0.001)
-                # Timestamps are already rebased before atempo. Using async
-                # resampling on 10-20 split branches can make FFmpeg 8.x wait
-                # forever at concat (observed on long projects around chunk 96).
-                filters.append(
-                    f"[asrc{index}]atrim=start={local_start:.6f}:end={local_end:.6f},"
-                    f"asetpts=PTS-STARTPTS,{_atempo_chain(tempo)},"
-                    f"apad,atrim=duration={float(piece['target']):.6f},asetpts=PTS-STARTPTS[a{index}]"
-                )
+                filters.append(f"[asrc{index}]atrim=start={local_start:.6f}:end={local_end:.6f},asetpts=PTS-STARTPTS,{_atempo_chain(tempo)},aresample=async=1:first_pts=0[a{index}]")
                 labels.append(f"[v{index}][a{index}]")
             else:
                 labels.append(f"[v{index}]")
@@ -554,34 +584,24 @@ def render(video: Path, srt: Path, voice_dir: Path, output_dir: Path, name: str,
         }
         _safe_log(log, json.dumps(progress_info, ensure_ascii=False))
         
-        command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-                   "-filter_complex_threads", "2", "-ss", f"{source_start:.6f}",
-                   "-t", f"{source_end-source_start:.6f}", "-i", str(video),
-                   "-filter_complex_script", str(script), "-map", "[vout]", *encoder]
+        command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{source_start:.6f}", "-t", f"{source_end-source_start:.6f}", "-i", str(video), "-filter_complex_script", str(script), "-map", "[vout]", *encoder]
         command += ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"] if keep_original_audio else ["-an"]
         command += ["-t", f"{expected_group_duration:.6f}"]
         command.append(str(chunk))
-        # A chunk is normally much faster than real time with GPU encoding.
-        # Bound pathological filters/drivers so one chunk cannot hang forever.
-        chunk_timeout = max(45.0, min(120.0, expected_group_duration * 2.5))
-        try:
-            if piecewise_mode:
-                raise RuntimeError("đang dùng chế độ từng đoạn an toàn sau một cụm không ổn định")
-            _run(command, f"Không render được cụm {group_index}", timeout=chunk_timeout)
-        except RuntimeError as exc:
-            piecewise_mode = True
-            _safe_log(log, f"Cụm {group_index} không ổn định ({exc}). Chuyển sang render từng đoạn an toàn cho phần còn lại…")
+        if safe_piecewise:
             _render_group_piecewise(
                 ffmpeg, ffprobe, video, chunk, group, source_fps, encoder,
                 keep_original_audio, expected_group_duration, log,
             )
+        else:
+            _run(command, f"Không render được cụm {group_index}; hãy thử cấu hình Máy yếu nếu video này không ổn định")
         signature_path.write_text(expected_signature, encoding="ascii")
 
     concat_file = target / "chunks.txt"
     concat_file.write_text("\n".join(f"file '{str(path).replace(chr(39), chr(39)*2)}'" for path in chunk_paths), encoding="utf-8")
     joined_video = target / "video-synced.mp4"
-    _safe_log(log, "Đang nối các cụm video…")
-    _run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(concat_file), "-c", "copy", str(joined_video)], "Không nối được video")
+    _safe_log(log, "Đang nối các cụm bằng -c copy theo pipeline FFmpeg-Test…")
+    _run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(concat_file), "-c", "copy", str(joined_video)], "Không nối được video bằng -c copy; các chunk đã render vẫn được giữ lại")
     joined_duration = _probe_duration(ffprobe, joined_video)
     allowed_drift = max(0.5, target_cursor * 0.001)
     if abs(joined_duration - target_cursor) > allowed_drift:

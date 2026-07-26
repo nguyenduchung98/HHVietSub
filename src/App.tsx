@@ -325,6 +325,14 @@ function SrtVoicePage() {
     localStorage.setItem('hhvietsub.voicePreset', JSON.stringify({engine,apiProvider,apiModel,apiVoiceId,apiWorkers,apiRequestInterval,subtitleLanguage,speed,capcutBackend,autoRetry}));
     showToast({kind:'success',title:'Đã lưu preset tạo voice',message:'Cấu hình hiện tại sẽ được dùng lại khi cần.'});
   };
+  useEffect(() => {
+    if (!window.desktop || !apiVoiceId || apiVoices.some((voice)=>voice.id===apiVoiceId)) return;
+    window.desktop.request<{ voices: ApiVoice[]; total: number }>('tts.voices.list', {
+      engine, provider: apiProvider, language: subtitleLanguage,
+    }).then((result) => {
+      setApiVoices(result.voices || []);
+    }).catch(() => undefined);
+  }, [engine, apiProvider, subtitleLanguage, apiVoiceId]);
   const restoreVoicePreset = () => {
     try {
       const preset = readVoicePreset();
@@ -449,14 +457,14 @@ function SrtVoicePage() {
     <div className="srt-voice-hero"><div><h1>Tạo giọng từ <span>file hoặc thư mục SRT.</span></h1><p>Chọn nguồn, giọng đọc rồi theo dõi toàn bộ hàng chờ ở một màn hình.</p></div></div>
     <section className="srt-output-bar"><div><FolderOpen size={17}/><span><small>JOB ĐÃ LƯU · KHÔNG TỰ ĐỘNG TẢI</small><select value={selectedJobId} onChange={(e)=>setSelectedJobId(e.target.value)}><option value="">Chọn job muốn mở…</option>{savedJobs.map((job)=><option key={job.jobId} value={job.jobId}>{job.createdAt || job.jobId} · {job.engine} · {job.voiceId || 'chưa chọn giọng'} · {job.completed}/{job.total}{job.failed?` · ${job.failed} lỗi`:''}</option>)}</select></span></div><button disabled={!selectedJobId||running} onClick={loadSavedJob}>Tải job</button><button disabled={running} onClick={()=>{setSelectedJobId('');setDraft(null);setOutputDir('');setProgress({done:0,total:0});setJobState('idle');setMessage('Đã tạo phiên trống. Hãy chọn file SRT mới.');}}>Job mới</button></section>
     {queue.length>0&&<section className="srt-queue-panel"><header><div><strong>HÀNG CHỜ TẠO VOICE</strong><small>{queue.filter((item)=>item.status==='completed').length}/{queue.length} file hoàn thành</small></div><button disabled={running} onClick={()=>setQueue((current)=>current.filter((item)=>item.status!=='completed'))}>Dọn file đã xong</button><button disabled={running} onClick={()=>{setQueue([]);setMessage('Đã xóa hàng chờ.');}}>Xóa hàng chờ</button></header><div className="srt-queue-list">{queue.map((item,index)=><article key={item.id} className={item.status} onClick={()=>{if(running)return;setDraft(item.draft);setOutputDir(item.outputDir||'');setProgress({done:item.done,total:item.total});}}><b>{index+1}</b><div><strong>{item.draft.name}</strong><small>{item.done}/{item.total} câu{item.error?` · ${item.error}`:''}</small></div><span>{item.status==='waiting'?'Đang chờ':item.status==='running'?'Đang tạo':item.status==='completed'?'Hoàn thành':item.status==='cancelled'?'Đã dừng':'Có lỗi'}</span><button disabled={running} title="Xóa khỏi hàng chờ" onClick={(event)=>{event.stopPropagation();setQueue((current)=>current.filter((queued)=>queued.id!==item.id));}}><X size={14}/></button></article>)}</div></section>}
-    {engine==='capcut'&&<section className="capcut-voice-tools"><label><small>NGUỒN CAPCUT TTS</small><select value={capcutBackend} onChange={(e)=>setCapcutBackend(e.target.value as typeof capcutBackend)}><option value="hybrid">Kết hợp nội bộ + Space (nhanh nhất)</option><option value="direct">Chỉ backend nội bộ</option><option value="space">Chỉ Hugging Face Space</option></select><span>{capcutBackend==='hybrid'?'Chia câu chẵn/lẻ cho hai nguồn; mỗi nguồn cách request 10 giây.':capcutBackend==='direct'?'Gọi trực tiếp CapCut API.':'Dùng tony2k/ai-voice-studio như trước.'}</span></label><button type="button" onClick={()=>setDictionaryOpen(true)}><FileText size={15}/> Từ điển phát âm <b>{pronunciationDictionary.length}</b></button></section>}
+    {engine==='capcut'&&<section className="capcut-voice-tools"><label><small>NGUỒN CAPCUT TTS</small><select value={capcutBackend} onChange={(e)=>setCapcutBackend(e.target.value as typeof capcutBackend)}><option value="hybrid">Kết hợp nội bộ + Space (nhanh nhất)</option><option value="direct">Chỉ backend nội bộ</option><option value="space">Chỉ Hugging Face Space</option></select><span>{capcutBackend==='hybrid'?'Chia câu chẵn/lẻ cho hai nguồn; mỗi nguồn cách request 10 giây.':capcutBackend==='direct'?'Gọi trực tiếp CapCut API.':'Dùng tony2k/ai-voice-studio như trước.'}</span></label></section>}
     <div className="saved-job-compact"><button type="button" disabled={running} onClick={()=>setJobPickerOpen(true)}><FolderOpen size={15}/> Job đã lưu <b>{savedJobs.length}</b></button></div>
     <section className="lite-engine-switch">
       <div>
         <small>DỊCH VỤ TẠO GIỌNG</small>
-        <button className={engine==='capcut'?'active':''} onClick={()=>{setEngine('capcut');setApiVoiceId('');setApiVoices([]);}}>CapCut TTS</button>
-        <button className={engine==='ai33'?'active':''} onClick={()=>{setEngine('ai33');setApiVoiceId('');setApiVoices([]);}}>AI33 API</button>
-        <button className={engine==='aimax'?'active':''} onClick={()=>{setEngine('aimax');setApiVoiceId('');setApiVoices([]);}}>AIMax API</button>
+        <button className={engine==='capcut'?'active':''} onClick={()=>{setEngine('capcut');setApiVoiceId(initialVoicePreset?.engine==='capcut'?initialVoicePreset.apiVoiceId||'':'');setApiVoices([]);}}>CapCut TTS</button>
+        <button className={engine==='ai33'?'active':''} onClick={()=>{setEngine('ai33');setApiVoiceId(initialVoicePreset?.engine==='ai33'?initialVoicePreset.apiVoiceId||'':'');setApiVoices([]);}}>AI33 API</button>
+        <button className={engine==='aimax'?'active':''} onClick={()=>{setEngine('aimax');setApiVoiceId(initialVoicePreset?.engine==='aimax'?initialVoicePreset.apiVoiceId||'':'');setApiVoices([]);}}>AIMax API</button>
       </div>
       <div className="lite-engine-actions">
       <button type="button" onClick={()=>setJobPickerOpen(true)}>
@@ -468,17 +476,16 @@ function SrtVoicePage() {
     <section className="srt-voice-config">
       <label className={`srt-input-card ${running?'disabled':''}`} role="button" tabIndex={running?-1:0} onClick={()=>{if(!running)void chooseSrt();}} onKeyDown={(event)=>{if(!running&&(event.key==='Enter'||event.key===' ')){event.preventDefault();void chooseSrt();}}}><small>FILE ĐẦU VÀO · BẤM ĐỂ CHỌN</small><strong>{draft?.name || 'Chưa chọn SRT'}</strong><span>{draft ? `${draft.rows.length} câu phụ đề · bấm để đổi file` : 'Chọn một file SRT từ máy'}</span></label>
       <button className="srt-folder-input" type="button" disabled={running} onClick={chooseSrtFolder}><small>THƯ MỤC ĐẦU VÀO</small><strong>Chọn thư mục SRT</strong><span>Quét toàn bộ file và tạo hàng chờ</span></button>
-      {engine === 'capcut' ? <><label className={!apiVoiceId?'voice-required':''}><small>GIỌNG CAPCUT SPACE</small><div className="voice-id-picker"><input value={apiVoices.find((voice)=>voice.id===apiVoiceId)?.name||''} readOnly placeholder={voiceLibraryLoading?'Đang tải thư viện giọng…':'Chưa chọn giọng'}/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div><span>{apiVoiceId?'Đã sẵn sàng tạo voice':'Bắt buộc chọn giọng trước khi chạy'}</span></label><label className="legacy-service-card"><small>DỊCH VỤ</small><strong>tony2k · AI Voice Studio</strong><span>CapCut TTS từ Hugging Face Space · không cần API key</span></label></> : <><label><small>VOICE ID</small><div className="voice-id-picker"><input value={apiVoiceId} onChange={(e) => setApiVoiceId(e.target.value)} placeholder="Chọn trong thư viện hoặc nhập ID"/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div></label><label><small>NHÀ CUNG CẤP {engine === 'aimax' ? '/ MODEL' : ''}</small><div className="inline-numbers"><select value={apiProvider} onChange={(e) => { const p=e.target.value; setApiProvider(p); setApiVoices([]); setApiModel(p === 'minimax' ? 'speech-2.8-hd' : 'eleven_multilingual_v2'); }}><option value="minimax">MiniMax</option><option value="elevenlabs">ElevenLabs</option>{engine === 'ai33' && <><option value="edge">Edge</option><option value="kokoro">Kokoro</option><option value="vbee">Vbee</option><option value="fishaudio">Fish Audio</option><option value="clone">Giọng clone</option></>}</select>{engine === 'aimax' && <select value={apiModel} onChange={(e) => setApiModel(e.target.value)}>{apiProvider === 'minimax' ? <><option value="speech-2.8-hd">2.8 HD</option><option value="speech-2.8-turbo">2.8 Turbo</option><option value="speech-2.6-hd">2.6 HD</option><option value="speech-2.6-turbo">2.6 Turbo</option><option value="speech-02-hd">02 HD</option><option value="speech-02-turbo">02 Turbo</option></> : <><option value="eleven_v3">Eleven v3</option><option value="eleven_multilingual_v2">Multilingual v2</option><option value="eleven_flash_v2_5">Flash v2.5</option><option value="eleven_turbo_v2_5">Turbo v2.5</option></>}</select>}</div></label></>}
+      {engine === 'capcut' ? <><label className={!apiVoiceId?'voice-required':''}><small>GIỌNG CAPCUT SPACE</small><div className="voice-id-picker"><input value={apiVoices.find((voice)=>voice.id===apiVoiceId)?.name||apiVoiceId} readOnly placeholder={voiceLibraryLoading?'Đang tải thư viện giọng…':'Chưa chọn giọng'}/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div><span>{apiVoiceId?'Đã sẵn sàng tạo voice':'Bắt buộc chọn giọng trước khi chạy'}</span></label><label className="legacy-service-card"><small>DỊCH VỤ</small><strong>tony2k · AI Voice Studio</strong><span>CapCut TTS từ Hugging Face Space · không cần API key</span></label></> : <><label><small>VOICE ID</small><div className="voice-id-picker"><input value={apiVoiceId} onChange={(e) => setApiVoiceId(e.target.value)} placeholder="Chọn trong thư viện hoặc nhập ID"/><button type="button" onClick={loadApiVoices}><Search size={14}/> Thư viện</button></div></label><label><small>NHÀ CUNG CẤP {engine === 'aimax' ? '/ MODEL' : ''}</small><div className="inline-numbers"><select value={apiProvider} onChange={(e) => { const p=e.target.value; setApiProvider(p); setApiVoices([]); setApiModel(p === 'minimax' ? 'speech-2.8-hd' : 'eleven_multilingual_v2'); }}><option value="minimax">MiniMax</option><option value="elevenlabs">ElevenLabs</option>{engine === 'ai33' && <><option value="edge">Edge</option><option value="kokoro">Kokoro</option><option value="vbee">Vbee</option><option value="fishaudio">Fish Audio</option><option value="clone">Giọng clone</option></>}</select>{engine === 'aimax' && <select value={apiModel} onChange={(e) => setApiModel(e.target.value)}>{apiProvider === 'minimax' ? <><option value="speech-2.8-hd">2.8 HD</option><option value="speech-2.8-turbo">2.8 Turbo</option><option value="speech-2.6-hd">2.6 HD</option><option value="speech-2.6-turbo">2.6 Turbo</option><option value="speech-02-hd">02 HD</option><option value="speech-02-turbo">02 Turbo</option></> : <><option value="eleven_v3">Eleven v3</option><option value="eleven_multilingual_v2">Multilingual v2</option><option value="eleven_flash_v2_5">Flash v2.5</option><option value="eleven_turbo_v2_5">Turbo v2.5</option></>}</select>}</div></label></>}
       <label><small>TỐC ĐỘ · {speed.toFixed(2)}×</small><input type="range" min="0.6" max="1.5" step="0.05" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} /></label>
       { <label><small>NGÔN NGỮ PHỤ ĐỀ</small><select value={subtitleLanguage} onChange={(e)=>{setSubtitleLanguage(e.target.value);setApiVoices([]);setApiVoiceId('');}}><option value="auto">Tự động nhận diện</option><option value="Vietnamese">Tiếng Việt</option><option value="English">Tiếng Anh</option><option value="Spanish">Tiếng Tây Ban Nha</option><option value="French">Tiếng Pháp</option><option value="German">Tiếng Đức</option><option value="Portuguese">Tiếng Bồ Đào Nha</option><option value="Italian">Tiếng Ý</option><option value="Japanese">Tiếng Nhật</option><option value="Korean">Tiếng Hàn</option><option value="Chinese">Tiếng Trung</option><option value="Thai">Tiếng Thái</option><option value="Indonesian">Tiếng Indonesia</option><option value="Russian">Tiếng Nga</option><option value="Arabic">Tiếng Ả Rập</option></select><span>Dùng để lọc giọng và tạo đúng phát âm</span></label>}
       <button className="srt-advanced-toggle" type="button" aria-expanded={advancedVoiceOptions} onClick={()=>setAdvancedVoiceOptions((current)=>!current)}><Settings2 size={15}/><span><strong>Tùy chọn nâng cao</strong><small>Luồng API, delay, retry và từ điển</small></span><ChevronDown size={16} className={advancedVoiceOptions?'rotated':''}/></button>
       {advancedVoiceOptions&&<>
-      <div className="voice-preset-actions"><button type="button" onClick={saveVoicePreset}><Download size={14}/> Lưu preset</button><button type="button" onClick={restoreVoicePreset}><RefreshCw size={14}/> Khôi phục</button><button type="button" onClick={()=>{setApiSettingsOpen(true);void loadApiKeyStatus();}}><Settings2 size={14}/> API key <b>{apiKeyStatus.ai33KeyCount + apiKeyStatus.aimaxKeyCount}</b></button></div>
+      <div className="voice-preset-actions"><button type="button" onClick={saveVoicePreset}><Download size={14}/> Lưu preset</button><button type="button" onClick={restoreVoicePreset}><RefreshCw size={14}/> Khôi phục</button>{engine==='capcut'?<button type="button" onClick={()=>setDictionaryOpen(true)}><FileText size={14}/> Từ điển <b>{pronunciationDictionary.length}</b></button>:<button type="button" onClick={()=>{setApiSettingsOpen(true);void loadApiKeyStatus();}}><Settings2 size={14}/> API key <b>{apiKeyStatus.ai33KeyCount + apiKeyStatus.aimaxKeyCount}</b></button>}</div>
       {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>SỐ LUỒNG API</small><input type="number" min="1" max="32" value={apiWorkers} onChange={(e)=>setApiWorkers(Math.min(32,Math.max(1,Number(e.target.value)||1)))}/><span>Tối đa request đang xử lý song song</span></label>}
       {(engine === 'ai33' || engine === 'aimax' || engine === 'capcut') && <label><small>DELAY GỬI API · GIÂY</small><input type="number" min="0" max="60" step="0.5" value={apiRequestInterval} onChange={(e)=>{const value=Math.min(60,Math.max(0,Number(e.target.value)||0));setApiRequestInterval(value);localStorage.setItem('hhvietsub.apiRequestInterval',String(value));}}/><span>Khoảng cách giữa hai request: {apiRequestInterval}s{engine==='capcut'&&capcutBackend==='hybrid'?' trên mỗi nguồn':''}</span></label>}
       <label><small>TỰ ĐỘNG RETRY LỖI</small><button type="button" onClick={() => setAutoRetry(!autoRetry)} style={{ border: autoRetry ? '1px solid #7edab7' : '1px solid #dfe3f0', borderRadius: 8, padding: '7px 8px', fontSize: 10, fontWeight: 700, cursor: 'pointer', background: autoRetry ? '#ecfbf5' : '#f4f5fa', color: autoRetry ? '#178360' : '#778198', display: 'flex', alignItems: 'center', gap: 5 }}>{autoRetry ? <><RefreshCw size={12} /> Bật (Tối đa 3 lượt)</> : 'Tắt'}</button></label>
       {engine==='capcut'&&<label className="capcut-source-card"><small>NGUỒN CAPCUT TTS</small><select value={capcutBackend} onChange={(e)=>setCapcutBackend(e.target.value as typeof capcutBackend)}><option value="hybrid">Kết Hợp</option><option value="direct">Nội Bộ</option><option value="space">Space</option></select><span>{capcutBackend==='hybrid'?'Chia tải cho hai nguồn để tạo nhanh hơn.':capcutBackend==='direct'?'Gọi trực tiếp CapCut API nội bộ.':'Dùng tony2k/ai-voice-studio.'}</span></label>}
-      {engine==='capcut'&&<label className="dictionary-config-card"><small>TỪ ĐIỂN PHÁT ÂM</small><button type="button" onClick={()=>setDictionaryOpen(true)}><FileText size={15}/><span>Mở từ điển</span><b>{pronunciationDictionary.length}</b></button><span>Tự động sửa cách đọc trước khi tạo MP3.</span></label>}
       </>}
     </section>
     <section className="srt-sticky-actions">
@@ -664,7 +671,7 @@ function FfmpegAndCapCutTab() {
 
       <div className="capcut-panel-card">
         <div className="panel-card-title"><Zap size={15}/> <span>CẤU HÌNH XUẤT</span></div>
-        <label><small>CẤU HÌNH THEO MÁY</small><select value={renderProfile} onChange={(e)=>setRenderProfile(e.target.value as typeof renderProfile)}><option value="weak">Máy yếu · CPU 4 luồng · ít RAM</option><option value="balanced">Cân bằng · GPU tự động</option><option value="fast">Máy mạnh · GPU · cache lớn</option></select></label>
+        <label><small>CẤU HÌNH THEO MÁY</small><select value={renderProfile} onChange={(e)=>{const profile=e.target.value as typeof renderProfile;setRenderProfile(profile);setEncoder(profile==='weak'?'x264':'auto');}}><option value="weak">Máy yếu · CPU 4 luồng · ít RAM</option><option value="balanced">Cân bằng · GPU tự động</option><option value="fast">Máy mạnh · GPU · cache lớn</option></select></label>
         <div className="panel-card-grid-2">
           <label><small>TÊN KẾT QUẢ</small><input value={jobName} onChange={(e)=>setJobName(e.target.value)}/></label>
           <label><small>BỘ MÃ HÓA VIDEO</small><select value={encoder} onChange={(e)=>setEncoder(e.target.value)}><option value="auto">Tự động</option><option value="nvenc">NVIDIA NVENC</option><option value="amf">AMD AMF</option><option value="qsv">Intel QSV</option><option value="x264">CPU (libx264)</option></select></label>
@@ -687,6 +694,7 @@ function FfmpegAndCapCutTab() {
 function CapCutProjectPage() {
   const { showToast } = useToast();
   const [subtab, setSubtab] = useState<'ffmpeg' | 'capcut'>('ffmpeg');
+  const [capcutRoot, setCapcutRoot] = useState(() => localStorage.getItem('hhvietsub.capcutProjectRoot') || '');
   const [projects, setProjects] = useState<{name:string;path:string}[]>([]);
   const [projectPath, setProjectPath] = useState('');
   const [srtPath, setSrtPath] = useState('');
@@ -698,7 +706,18 @@ function CapCutProjectPage() {
   const [result, setResult] = useState<{ projectName: string; projectPath: string; template: string } | null>(null);
   const [capcutProgress, setCapcutProgress] = useState(0);
   const [capcutProgressError, setCapcutProgressError] = useState(false);
-  useEffect(() => { window.desktop?.request<{name:string;path:string}[]>('project.list').then((items)=>{setProjects(items || []);if(items?.length)setProjectPath((value)=>value || items[0].path);}).catch(()=>undefined); }, []);
+  const loadCapcutProjects = async (rootPath = capcutRoot) => {
+    if (!window.desktop) return;
+    try {
+      const items = await window.desktop.request<{name:string;path:string}[]>('project.list', { rootPath });
+      setProjects(items || []);
+      setProjectPath((current) => items?.some((item) => item.path === current) ? current : (items?.[0]?.path || ''));
+    } catch {
+      setProjects([]);
+      setProjectPath('');
+    }
+  };
+  useEffect(() => { void loadCapcutProjects(); }, []);
   useEffect(() => window.desktop?.onBackendEvent((raw) => {
     const event = raw as { event?: string; data?: { message?: string } };
     if (event.event === 'capcut.project.progress' && event.data?.message) {
@@ -718,7 +737,16 @@ function CapCutProjectPage() {
       .then((value) => { setAnalysis(value); setMessage(value?.ready ? `Sẵn sàng: ${value.subtitles} phụ đề ↔ ${value.voiceFiles} voice.` : `Thiếu ${value?.missing.length || 0} file voice.`); })
       .catch((error) => setMessage(error instanceof Error ? error.message : String(error)));
   }, [projectPath, srtPath, voiceDir]);
-  const pick = async (kind: 'srt' | 'voice') => {
+  const pick = async (kind: 'srt' | 'voice' | 'capcutRoot') => {
+    if (kind === 'capcutRoot') {
+      const path = await window.desktop?.selectFolder();
+      if (path) {
+        setCapcutRoot(path);
+        localStorage.setItem('hhvietsub.capcutProjectRoot', path);
+        await loadCapcutProjects(path);
+      }
+      return;
+    }
     if (kind === 'voice') { const path = await window.desktop?.selectFolder(); if (path) setVoiceDir(path); return; }
     const path = await window.desktop?.selectFile({ filters: [{ name: 'SubRip Subtitle', extensions: ['srt'] }] });
     if (path) setSrtPath(path);
@@ -743,11 +771,12 @@ function CapCutProjectPage() {
       <div className="capcut-project-hero"><div><h1>Thêm voice và <span>đồng bộ timeline.</span></h1><p>Chỉnh sửa dự án CapCut có sẵn và tự động sao lưu JSON trước khi ghi.</p></div></div>
       <div className="sync-workspace-grid">
         <section className="sync-input-panel">
-          <header><strong>Đầu vào</strong><small>Chọn dự án, phụ đề và thư mục voice.</small></header>
+          <header><strong>Đầu vào</strong><small>Chọn thư mục lưu dự án, project, phụ đề và voice.</small></header>
           <div className="sync-input-list">
-            <SyncInputRow number={1} icon={<Clapperboard size={20}/>} label="DỰ ÁN CAPCUT" description="Chọn dự án" value={projectPath}><select value={projectPath} onChange={(e)=>setProjectPath(e.target.value)}><option value="">Chọn dự án…</option>{projects.map((project)=><option key={project.path} value={project.path}>{project.name}</option>)}</select></SyncInputRow>
-            <SyncInputRow number={2} icon={<Captions size={20}/>} label="PHỤ ĐỀ SRT" description="Chọn file SRT" value={srtPath} onClick={()=>pick('srt')}/>
-            <SyncInputRow number={3} icon={<AudioLines size={20}/>} label="THƯ MỤC VOICE" description="Chọn thư mục voice" value={voiceDir} onClick={()=>pick('voice')}/>
+            <SyncInputRow number={1} icon={<FolderOpen size={20}/>} label="THƯ MỤC DỰ ÁN CAPCUT" description="Chọn nơi CapCut đang lưu project" value={capcutRoot} onClick={()=>pick('capcutRoot')}/>
+            <SyncInputRow number={2} icon={<Clapperboard size={20}/>} label="DỰ ÁN CAPCUT" description={projects.length ? "Chọn dự án" : "Không tìm thấy dự án trong thư mục"} value={projectPath}><select value={projectPath} onChange={(e)=>setProjectPath(e.target.value)}><option value="">Chọn dự án…</option>{projects.map((project)=><option key={project.path} value={project.path}>{project.name}</option>)}</select></SyncInputRow>
+            <SyncInputRow number={3} icon={<Captions size={20}/>} label="PHỤ ĐỀ SRT" description="Chọn file SRT" value={srtPath} onClick={()=>pick('srt')}/>
+            <SyncInputRow number={4} icon={<AudioLines size={20}/>} label="THƯ MỤC VOICE" description="Chọn thư mục voice" value={voiceDir} onClick={()=>pick('voice')}/>
           </div>
         </section>
         <section className="sync-right-column">

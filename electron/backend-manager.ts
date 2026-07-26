@@ -1,5 +1,6 @@
 import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { app } from 'electron';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -47,6 +48,9 @@ export class BackendManager {
     const installed = candidates.find((candidate) => fs.existsSync(candidate));
     if (installed) return installed;
 
+    if (app.isPackaged) {
+      throw new Error('Bộ cài thiếu Python Runtime đi kèm. Vui lòng cài lại HHVietSub Lite.');
+    }
     return 'python.exe';
   }
 

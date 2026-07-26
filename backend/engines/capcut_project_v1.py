@@ -15,17 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-LEGACY_ROOT = Path(
-    os.environ.get("HHVIETSUB_CAPCUT_BRIDGE_ROOT")
-    or Path(__file__).resolve().parents[2] / "runtime" / "CapCutBridge"
-).expanduser().resolve()
-if not LEGACY_ROOT.is_dir():
-    raise RuntimeError(
-        "Không tìm thấy CapCut bridge. Hãy đặt biến HHVIETSUB_CAPCUT_BRIDGE_ROOT "
-        "hoặc cấu hình thư mục tích hợp CapCut."
-    )
-sys.path.insert(0, str(LEGACY_ROOT))
-from core.draft_engine import (  # noqa: E402
+from backend.engines.capcut_draft_engine import (
     _apply_srt_to_existing_text_track,
     _collect_srt_segments,
     _ffprobe_duration_us,
@@ -40,10 +30,17 @@ from core.draft_engine import (  # noqa: E402
 
 
 def project_root() -> Path:
-    config = json.loads((LEGACY_ROOT / "config.json").read_text(encoding="utf-8"))
-    root = Path(str(config.get("capcut_path", "")))
-    if not root.is_dir():
-        raise RuntimeError("Không tìm thấy thư mục dự án CapCut")
+    configured = str(os.environ.get("HHVIETSUB_CAPCUT_PROJECT_ROOT", "")).strip()
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    documents = Path.home() / "Documents"
+    candidates = [
+        Path(configured).expanduser() if configured else None,
+        local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft",
+        documents / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft",
+    ]
+    root = next((candidate.resolve() for candidate in candidates if candidate and candidate.is_dir()), None)
+    if root is None:
+        raise RuntimeError("Không tìm thấy thư mục dự án CapCut; hãy chọn thư mục trong giao diện.")
     return root
 
 
@@ -324,7 +321,9 @@ def sync_existing_project(project: Path, srt: Path, voice_dir: Path,
         final_data = load_draft_json(final_draft, require_tracks=True)
         final_duration = int(final_data.get("duration", 0))
         _finalize_native_metadata(project, final_duration)
-        _patch_root_registration(project_root(), project, duration=final_duration)
+        # A project library can live outside CapCut's default directory.
+        # Register against the selected project's actual parent directory.
+        _patch_root_registration(project.parent, project, duration=final_duration)
         return {"projectName": project.name, "projectPath": str(project), "template": "Dự án có sẵn",
                 "backupPath": str(backup_dir), "analysis": analysis, "import": import_result,
                 "cut": cut_result, "sync": sync_result}

@@ -29,7 +29,8 @@
     "build": "tsc -p electron/tsconfig.json && vite build",
     "build:electron": "tsc -p electron/tsconfig.json",
     "build:web": "vite build",
-    "package:win": "npm run build && electron-builder --win nsis portable",
+    "runtime:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime.ps1",
+    "package:win": "npm run runtime:prepare && npm run build && electron-builder --win nsis portable",
     "package:dir": "npm run build && electron-builder --win dir",
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "backend:check": "node scripts/backend-check.mjs",
@@ -45,7 +46,8 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*"
     ],
     "extraResources": [
       {
@@ -68,15 +70,20 @@
         "from": "vendor",
         "to": "vendor",
         "filter": [
-          "ffprobe.exe"
+          "ffmpeg/**/*",
+          "capcut-cli/**/*"
         ]
       },
       {
-        "from": "setup_ffmpeg.bat",
-        "to": "setup_ffmpeg.bat"
+        "from": "runtime/python",
+        "to": "runtime/python",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
@@ -86,18 +93,18 @@
     "npmRebuild": false,
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     }
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest",
-    "zustand": "latest"
-  },
-  "devDependencies": {
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",

@@ -29,7 +29,7 @@ const grantPath = (value: string) => {
 };
 
 const PATH_RESULT_KEYS = new Set([
-  'path', 'file', 'outputDir', 'manifestPath', 'projectPath',
+  'path', 'file', 'outputDir', 'manifestPath', 'projectPath', 'rootPath',
   'audioPath', 'videoPath', 'srtPath', 'voiceDir',
 ]);
 

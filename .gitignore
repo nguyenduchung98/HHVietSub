@@ -6,6 +6,8 @@ dist-package*/
 dist-release/
 .dev-user-data/
 runtime/
+.runtime-cache/
+vendor/ffmpeg/
 *.log
 __pycache__/
 *.pyc
