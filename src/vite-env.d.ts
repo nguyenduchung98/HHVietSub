@@ -16,6 +16,11 @@ interface Window {
     loginGem: () => Promise<unknown>;
     cancelGem: () => Promise<void>;
     pauseGem: (paused: boolean) => Promise<{ paused: boolean }>;
+    translateWithBrowser: <T = unknown>(params: unknown) => Promise<T>;
+    openTranslator: (url: string) => Promise<unknown>;
+    loginTranslator: (provider: 'gemini' | 'chatgpt') => Promise<unknown>;
+    cancelTranslation: () => Promise<void>;
+    pauseTranslation: (paused: boolean) => Promise<{ paused: boolean }>;
     onBackendEvent: (handler: (event: unknown) => void) => () => void;
   };
 }

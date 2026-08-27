@@ -228,6 +228,25 @@ app.whenReady().then(async () => {
   ipcMain.handle('gemini:login', (event) => { assertTrustedSender(event); return gemini?.login(); });
   ipcMain.handle('gemini:cancel', (event) => { assertTrustedSender(event); return gemini?.cancel(); });
   ipcMain.handle('gemini:pause', (event, paused: boolean) => { assertTrustedSender(event); return gemini?.setPaused(Boolean(paused)); });
+  ipcMain.handle('translator:translate', async (event, params) => {
+    assertTrustedSender(event);
+    const result = await gemini?.translate(params);
+    if (result && Notification.isSupported()) {
+      new Notification({ title: 'HHVietSub', body: `Đã dịch xong ${result.results.length} câu trong ${result.chunks} chunk.` }).show();
+    }
+    if (window && !window.isDestroyed()) {
+      window.show(); window.flashFrame(true);
+      setTimeout(() => { if (window && !window.isDestroyed()) window.flashFrame(false); }, 3000);
+    }
+    return result;
+  });
+  ipcMain.handle('translator:open', (event, url: string) => { assertTrustedSender(event); return gemini?.open(url); });
+  ipcMain.handle('translator:login', (event, provider: string) => {
+    assertTrustedSender(event);
+    return provider === 'chatgpt' ? gemini?.loginChatGpt() : gemini?.login();
+  });
+  ipcMain.handle('translator:cancel', (event) => { assertTrustedSender(event); return gemini?.cancel(); });
+  ipcMain.handle('translator:pause', (event, paused: boolean) => { assertTrustedSender(event); return gemini?.setPaused(Boolean(paused)); });
   ipcMain.handle('dialog:file', async (event, options: unknown) => {
     assertTrustedSender(event);
     const result = await dialog.showOpenDialog(window!, { properties: ['openFile'], ...sanitizeFileDialogOptions(options) });

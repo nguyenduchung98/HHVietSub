@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import queue
 import re
 import shutil
 import subprocess
@@ -26,6 +28,7 @@ class VoiceStudioService:
         omnivoice_root: Path,
         voice_config: Callable[[], dict[str, Any]],
         remote_generate: Callable[[str, str, dict[str, Any], Path], dict[str, Any]],
+        emit: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.user_data = user_data.resolve()
         self.app_root = app_root.resolve()
@@ -33,7 +36,11 @@ class VoiceStudioService:
         self.voices_dir = self.omnivoice_root / "voices"
         self.voice_config = voice_config
         self.remote_generate = remote_generate
+        self.emit = emit or (lambda _event: None)
         self._history_lock = threading.Lock()
+        self._runtime_lock = threading.Lock()
+        self._runtime_process: subprocess.Popen[str] | None = None
+        self._runtime_output: queue.Queue[str | None] | None = None
 
     def list_voices(self) -> list[dict[str, Any]]:
         voices: list[dict[str, Any]] = []
@@ -190,23 +197,144 @@ class VoiceStudioService:
             raise RuntimeError("Không tìm thấy Python của OmniVoice")
         seed_value = params.get("seed")
         seed = int(seed_value) if str(seed_value or "").strip() else int(time.time_ns() % 2_147_483_647)
-        command = [str(python), str(self.app_root / "backend" / "engines" / "omnivoice_generate.py"),
-                   "--text", text, "--voice-dir", str(voice_dir), "--output", str(output_path),
-                   "--language", str(params.get("language", "vi")), "--speed", str(float(params.get("speed", 1.0))),
-                   "--steps", str(int(params.get("steps", 32))), "--guidance", str(float(params.get("guidance", 2.0))),
-                   "--seed", str(seed)]
-        if bool(params.get("denoise", True)): command.append("--denoise")
-        if bool(params.get("postprocess", True)): command.append("--postprocess")
         started = time.perf_counter()
-        completed = subprocess.run(command, cwd=str(self.omnivoice_root), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=1800,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if completed.returncode != 0:
-            detail = completed.stderr.strip() or completed.stdout.strip() or f"Mã lỗi {completed.returncode}"
-            raise RuntimeError(f"OmniVoice không thể tạo audio: {detail[-1200:]}")
+        self._runtime_generate({
+            "text": text, "voiceDir": str(voice_dir), "output": str(output_path),
+            "language": str(params.get("language", "vi")),
+            "speed": float(params.get("speed", 1.0)),
+            "steps": int(params.get("steps", 32)),
+            "guidance": float(params.get("guidance", 2.0)),
+            "seed": seed, "denoise": bool(params.get("denoise", True)),
+            "postprocess": bool(params.get("postprocess", True)),
+        })
         with wave.open(str(output_path), "rb") as wav:
             duration = wav.getnframes() / max(1, wav.getframerate())
         return {"duration": round(duration, 2), "generationTime": round(time.perf_counter() - started, 2), "seed": seed}
+
+    def _runtime_generate(self, payload: dict[str, Any]) -> None:
+        with self._runtime_lock:
+            self._ensure_runtime_locked()
+            assert self._runtime_process is not None and self._runtime_process.stdin is not None
+            assert self._runtime_output is not None
+            request_id = uuid.uuid4().hex
+            request = {"id": request_id, "action": "generate", **payload}
+            try:
+                self._runtime_process.stdin.write(json.dumps(request, ensure_ascii=True) + "\n")
+                self._runtime_process.stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
+                self._clear_runtime_locked()
+                raise RuntimeError("Runtime OmniVoice đã dừng trước khi nhận tác vụ.") from exc
+            started = time.monotonic()
+            last_progress = started
+            stage = "model"
+            logs: list[str] = []
+            while True:
+                try:
+                    line = self._runtime_output.get(timeout=1)
+                except queue.Empty:
+                    line = ""
+                if line is None:
+                    self._clear_runtime_locked()
+                    raise RuntimeError("Runtime OmniVoice đã dừng đột ngột: " + "\n".join(logs[-10:]))
+                if line:
+                    logs.append(line)
+                    try:
+                        packet = json.loads(line)
+                    except ValueError:
+                        packet = None
+                    if not isinstance(packet, dict):
+                        continue
+                    if packet.get("event") == "progress" and packet.get("id") == request_id:
+                        stage = str(packet.get("stage") or stage)
+                        last_progress = time.monotonic()
+                        self._emit_progress(stage, str(packet.get("message") or "Đang xử lý…"))
+                    if packet.get("id") == request_id and "ok" in packet:
+                        if packet.get("ok"):
+                            return
+                        raise RuntimeError(f"OmniVoice không thể tạo audio: {packet.get('error', 'Lỗi không xác định')}")
+                now = time.monotonic()
+                if now - started > 1800:
+                    self._clear_runtime_locked(terminate=True)
+                    raise RuntimeError("OmniVoice vượt quá thời gian tối đa 30 phút và đã được dừng.")
+                if stage in {"model", "model_ready"} and now - last_progress > 180:
+                    self._clear_runtime_locked(terminate=True)
+                    raise RuntimeError("OmniVoice bị treo khi nạp model quá 180 giây và đã được dừng.")
+
+    def _ensure_runtime_locked(self) -> None:
+        if self._runtime_process and self._runtime_process.poll() is None:
+            return
+        python = self.omnivoice_root / ".venv" / "Scripts" / "python.exe"
+        runtime = self.app_root / "backend" / "engines" / "omnivoice_runtime.py"
+        child_env = os.environ.copy()
+        child_env.update({"PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+        process = subprocess.Popen(
+            [str(python), "-u", str(runtime)], cwd=str(self.omnivoice_root),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1, env=child_env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert process.stdout is not None
+        output: queue.Queue[str | None] = queue.Queue()
+
+        def read_output() -> None:
+            try:
+                for line in process.stdout:
+                    output.put(line.rstrip())
+            finally:
+                output.put(None)
+
+        threading.Thread(target=read_output, daemon=True, name="omnivoice-runtime-output").start()
+        self._runtime_process, self._runtime_output = process, output
+        deadline = time.monotonic() + 60
+        logs: list[str] = []
+        while time.monotonic() < deadline:
+            try:
+                line = output.get(timeout=1)
+            except queue.Empty:
+                continue
+            if line is None:
+                break
+            logs.append(line)
+            try:
+                packet = json.loads(line)
+            except ValueError:
+                continue
+            if packet.get("event") == "runtime":
+                self._emit_progress(str(packet.get("stage") or "startup"), str(packet.get("message") or "Đang khởi động…"))
+                if packet.get("stage") == "ready":
+                    return
+        self._clear_runtime_locked(terminate=True)
+        raise RuntimeError("Không thể khởi động runtime OmniVoice trong 60 giây: " + "\n".join(logs[-10:]))
+
+    def unload_runtime(self) -> None:
+        with self._runtime_lock:
+            self._clear_runtime_locked(terminate=True)
+
+    def _clear_runtime_locked(self, terminate: bool = False) -> None:
+        process = self._runtime_process
+        self._runtime_process = None
+        self._runtime_output = None
+        if terminate and process is not None:
+            self._terminate_process_tree(process)
+
+    def _emit_progress(self, stage: str, message: str) -> None:
+        try:
+            self.emit({"event": "studio.progress", "data": {"stage": stage, "message": message}})
+        except Exception:
+            logging.exception("Cannot emit OmniVoice studio progress")
+
+    @staticmethod
+    def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        else:
+            process.kill()
 
     def _voice_dir(self, voice_id: str) -> Path:
         if not voice_id or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}", voice_id):

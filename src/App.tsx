@@ -166,6 +166,10 @@ function Studio({ voices, selectedVoice, setSelectedVoice, text, setText, onHist
   const [status, setStatus] = useState('Sẵn sàng khi bạn bắt đầu');
   const [audioUrl, setAudioUrl] = useState('');
   const [result, setResult] = useState<StudioResult | null>(null);
+  useEffect(() => window.desktop?.onBackendEvent((raw) => {
+    const packet = raw as { event?: string; data?: { message?: string } };
+    if (packet.event === 'studio.progress' && packet.data?.message) setStatus(packet.data.message);
+  }), []);
   const generate = async () => {
     if (!window.desktop) return setStatus('Chức năng tạo giọng chỉ hoạt động trong Electron.');
     if (!text.trim()) return setStatus('Vui lòng nhập nội dung cần tạo giọng.');
@@ -190,10 +194,11 @@ function Studio({ voices, selectedVoice, setSelectedVoice, text, setText, onHist
 
 function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void }) {
   type SubtitleRow = { id: number; start: string; end: string; source: string; translated: string };
+  const [translationProvider, setTranslationProvider] = useState<'gemini' | 'chatgpt'>(() => localStorage.getItem('hhvietsub.translationProvider') === 'gemini' ? 'gemini' : 'chatgpt');
   const [model, setModel] = useState(() => localStorage.getItem('hhvietsub.geminiModel') || '3.5 Flash-Lite');
   const [gemUrl, setGemUrl] = useState(() => localStorage.getItem('hhvietsub.gemUrl') || 'https://gemini.google.com/gem/1C0dbBamFcx7CUGXr5bTL48p1A6HX6sgw?usp=sharing');
+  const [gptUrl, setGptUrl] = useState(() => localStorage.getItem('hhvietsub.gptUrl') || 'https://chatgpt.com/g/g-6a78162bfb588191a91acd30ac76cdce-hhvietsub-translator');
   const [batchSize, setBatchSize] = useState(100);
-  const [workers, setWorkers] = useState(1);
   const [savedGems, setSavedGems] = useState<{ name: string; url: string }[]>([]);
   const [selectedGem, setSelectedGem] = useState('');
   const [newGemName, setNewGemName] = useState('');
@@ -217,7 +222,7 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
       const merged = [...settings.gemini.saved, ...localSaved].filter((item, index, all) => item?.name && item?.url && all.findIndex((candidate) => candidate.name === item.name) === index);
       setGemUrl(settings.gemini.url); setSavedGems(merged); setSelectedGem(settings.gemini.selected);
       const savedModelAliases: Record<string, string> = { '3.5 Flash': '3.6 Flash', '3.1 Flash-Lite': '3.5 Flash-Lite' };
-      setModel(localStorage.getItem('hhvietsub.geminiModel') || savedModelAliases[settings.gemini.model] || settings.gemini.model || '3.5 Flash-Lite'); setBatchSize(settings.gemini.batch); setWorkers(1); setProfileReady(settings.gemini.profileReady);
+      setModel(localStorage.getItem('hhvietsub.geminiModel') || savedModelAliases[settings.gemini.model] || settings.gemini.model || '3.5 Flash-Lite'); setBatchSize(settings.gemini.batch); setProfileReady(settings.gemini.profileReady);
     }).catch(() => undefined);
   }, []);
   const openSrt = async () => {
@@ -262,17 +267,29 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
   };
   const startTranslation = async (translateAll = false) => {
     if (!window.desktop || !rows.length || translating) return;
-    if (!gemUrl.trim()) { setShowOptions(true); setMessage('Vui lòng nhập link Gem.'); return; }
+    const translatorUrl = translationProvider === 'chatgpt' ? gptUrl.trim() : gemUrl.trim();
+    if (!translatorUrl) { setShowOptions(true); setMessage(`Vui lòng nhập link ${translationProvider === 'chatgpt' ? 'GPTs' : 'Gem'}.`); return; }
+    if (translationProvider === 'chatgpt' && !translatorUrl.startsWith('https://chatgpt.com/g/')) { setShowOptions(true); setMessage('Link GPTs không hợp lệ.'); return; }
+    if (translationProvider === 'gemini' && !translatorUrl.startsWith('https://gemini.google.com/')) { setShowOptions(true); setMessage('Link Gem không hợp lệ.'); return; }
     if (!characterBible.trim()) return setMessage('Vui lòng chọn file Character Bible trước khi dịch.');
-    const selectedRows = translateAll ? rows : rows.filter((row) => !row.translated.trim());
+    const requestedRows = translateAll ? rows : rows.filter((row) => !row.translated.trim());
+    const passthroughRows = requestedRows.filter((row) => !/[\p{Script=Han}\p{L}]/u.test(row.source));
+    if (passthroughRows.length) {
+      const passthrough = new Map(passthroughRows.map((row) => [row.id, row.source.trim()]));
+      setRows((current) => current.map((row) => passthrough.has(row.id) ? { ...row, translated: passthrough.get(row.id)! } : row));
+    }
+    const selectedRows = requestedRows.filter((row) => /[\p{Script=Han}\p{L}]/u.test(row.source));
     if (!selectedRows.length) return setMessage('Tất cả câu đã có bản dịch. Chọn “Dịch lại tất cả” nếu muốn làm mới toàn bộ.');
+    const effectiveBatchSize = batchSize;
     localStorage.setItem('hhvietsub.gemUrl', gemUrl.trim());
+    localStorage.setItem('hhvietsub.gptUrl', gptUrl.trim());
+    localStorage.setItem('hhvietsub.translationProvider', translationProvider);
     setTranslating(true); setTranslationPaused(false);
-    setTranslationProgress({ done: 0, total: Math.ceil(selectedRows.length / batchSize), chunk: 0, worker: 0 });
+    setTranslationProgress({ done: 0, total: Math.ceil(selectedRows.length / effectiveBatchSize), chunk: 0, worker: 0 });
     try {
-      setMessage(`Đang mở Gem và gửi ${Math.ceil(selectedRows.length / batchSize)} chunk…`);
-      const response = await window.desktop.translateWithGem<{ results: { id: number; translated: string }[]; chunks: number }>({
-        gemUrl: gemUrl.trim(), modelName: model, batchSize, workers: 1, sourceLanguage: 'Auto', targetLanguage: 'Tiếng Việt', glossary, characterBible,
+      setMessage(`Đang mở ${translationProvider === 'chatgpt' ? 'GPTs' : 'Gem'} và gửi ${Math.ceil(selectedRows.length / effectiveBatchSize)} chunk…`);
+      const response = await window.desktop.translateWithBrowser<{ results: { id: number; translated: string }[]; chunks: number }>({
+        provider: translationProvider, gemUrl: gemUrl.trim(), gptUrl: gptUrl.trim(), modelName: model, batchSize: effectiveBatchSize, workers: 1, sourceLanguage: 'Auto', targetLanguage: 'Tiếng Việt', glossary, characterBible,
         entries: selectedRows.map((row) => ({ id: row.id, text: row.source })),
       });
       const translatedMap = new Map(response.results.map((item) => [item.id, item.translated]));
@@ -293,7 +310,7 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
       return;
     }
     if (event.event === 'translation.model') {
-      setMessage(`Đã chọn model ${event.data.model || model} trên Gemini; đang nạp Character Bible…`);
+      setMessage(translationProvider === 'chatgpt' ? 'Đã mở HHVietSub Translator; đang nạp Character Bible…' : `Đã chọn model ${event.data.model || model} trên Gemini; đang nạp Character Bible…`);
       return;
     }
     if (event.event === 'translation.result' && event.data.results) {
@@ -307,10 +324,10 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
     }
     if (event.event !== 'translation.progress') return;
     setTranslationProgress({done:event.data.done || 0,total:event.data.total || 0,chunk:event.data.chunk || 0,worker:event.data.worker || 0});
-    setMessage(`Đang dịch chunk ${event.data.chunk}/${event.data.total} · tab ${event.data.worker}${event.data.attempt ? ` · lần ${event.data.attempt}` : ''}`);
+    setMessage(`Đang dịch chunk ${event.data.chunk}/${event.data.total}${event.data.attempt ? ` · lần ${event.data.attempt}` : ''}`);
   }), []);
-  const pauseTranslation = async () => { const paused = !translationPaused; await window.desktop?.pauseGem(paused); setTranslationPaused(paused); setMessage(paused ? 'Đã tạm dừng sau request hiện tại.' : 'Đang tiếp tục dịch…'); };
-  const cancelTranslation = async () => { await window.desktop?.cancelGem(); setMessage('Đang hủy dịch; các câu đã hoàn thành vẫn được giữ lại.'); };
+  const pauseTranslation = async () => { const paused = !translationPaused; await window.desktop?.pauseTranslation(paused); setTranslationPaused(paused); setMessage(paused ? 'Đã tạm dừng sau request hiện tại.' : 'Đang tiếp tục dịch…'); };
+  const cancelTranslation = async () => { await window.desktop?.cancelTranslation(); setMessage('Đang hủy dịch; các câu đã hoàn thành vẫn được giữ lại.'); };
   const updateRow = (id: number, field: 'source' | 'translated', value: string) => setRows((current) => current.map((row) => row.id === id ? { ...row, [field]: value } : row));
   const characterCount = rows.reduce((sum, row) => sum + row.source.length, 0);
   const translatedCount = rows.filter((row) => row.translated.trim()).length;
@@ -320,15 +337,15 @@ function TranslatePage({ onSendToSrt }: { onSendToSrt: (draft: SrtDraft) => void
     <div className="translate-toolbar">
       <button className="file-drop" onClick={openCharacterBible} disabled={translating}><UploadCloud size={20} /><span><strong>{characterBibleName || '1. Chọn Character Bible'}</strong><small>{characterBiblePath || 'TXT, MD, JSON hoặc CSV · tối đa 5 MB'}</small></span></button>
       <button className="file-drop" onClick={openSrt} disabled={translating}><UploadCloud size={20} /><span><strong>{fileName || '2. Chọn tệp phụ đề SRT'}</strong><small>{fileName ? 'Bấm để chọn tệp khác' : 'Kéo thả hoặc bấm để tải tệp'}</small></span></button>
-      <label><small>GEM ĐÃ LƯU</small><select value={selectedGem} onChange={(e) => { const name = e.target.value; setSelectedGem(name); const gem = savedGems.find((item) => item.name === name); if (gem) setGemUrl(gem.url); }}><option value="">Chọn Gem</option>{savedGems.map((gem) => <option key={gem.name}>{gem.name}</option>)}</select></label>
-      <label><small>MÔ HÌNH GEMINI</small><select value={model} onChange={(e) => { setModel(e.target.value); localStorage.setItem('hhvietsub.geminiModel', e.target.value); }}><option>3.5 Flash-Lite</option><option>3.6 Flash</option><option>3.1 Pro</option><option>Tư duy mở rộng</option></select></label>
+      {translationProvider === 'gemini' ? <label><small>GEM ĐÃ LƯU</small><select value={selectedGem} onChange={(e) => { const name = e.target.value; setSelectedGem(name); const gem = savedGems.find((item) => item.name === name); if (gem) setGemUrl(gem.url); }}><option value="">Chọn Gem</option>{savedGems.map((gem) => <option key={gem.name}>{gem.name}</option>)}</select></label> : <label><small>GPT ĐANG DÙNG</small><select value="HHVietSub Translator" disabled><option>HHVietSub Translator</option></select></label>}
+      {translationProvider === 'gemini' ? <label><small>MÔ HÌNH GEMINI</small><select value={model} onChange={(e) => { setModel(e.target.value); localStorage.setItem('hhvietsub.geminiModel', e.target.value); }}><option>3.5 Flash-Lite</option><option>3.6 Flash</option><option>3.1 Pro</option><option>Tư duy mở rộng</option></select></label> : <label><small>NỀN TẢNG</small><select value="ChatGPT" disabled><option>ChatGPT GPTs</option></select></label>}
       <label><small>BLOCK / CHUNK</small><input type="number" min="1" max="300" value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(300, Number(e.target.value) || 1)))} /></label>
-      <label><small>SỐ LUỒNG / TAB</small><select value={workers} disabled><option value="1">1 · Ưu tiên chính xác</option></select></label>
+      <label><small>NGUỒN DỊCH</small><select value={translationProvider} disabled={translating} onChange={(e) => { const value = e.target.value === 'chatgpt' ? 'chatgpt' : 'gemini'; setTranslationProvider(value); localStorage.setItem('hhvietsub.translationProvider', value); }}><option value="chatgpt">ChatGPT GPTs</option><option value="gemini">Gemini Gem</option></select></label>
     </div>
     <div className="translation-stats"><span><strong>{rows.length}</strong> câu</span><span><strong>{Math.ceil(missingCount / batchSize)}</strong> chunk còn lại</span><span><strong>{translatedCount}</strong> đã dịch</span><span className={missingCount ? 'profile-warning' : 'success'}><Check size={13} /> {rows.length ? (missingCount ? `${missingCount} câu còn thiếu` : 'Bản dịch đã đầy đủ') : 'Chưa có dữ liệu'}</span><span className={profileReady ? 'success' : 'profile-warning'}><Check size={13} /> {profileReady ? 'Chrome đã đăng nhập' : 'Chưa có profile'}</span><button onClick={() => setShowOptions(!showOptions)}><Settings2 size={15} /> Kết nối & từ điển</button></div>
-    {showOptions && <section className="translation-options browser-options"><label><span>Link Gemini Gem</span><input value={gemUrl} onChange={(e) => setGemUrl(e.target.value)} placeholder="https://gemini.google.com/gem/..." /><small>Electron điều khiển Chrome trực tiếp bằng CDP, không dùng Selenium.</small></label><label><span>Lưu Gem mới</span><input value={newGemName} onChange={(e) => setNewGemName(e.target.value)} placeholder="Tên gợi nhớ cho Gem" /><button type="button" onClick={saveNewGem}>Lưu Gem mới</button></label><div className="gem-browser-actions"><button onClick={() => window.desktop?.loginGem()}>Đăng nhập Google</button><button onClick={() => window.desktop?.openGem(gemUrl)}>Mở Gem kiểm tra</button></div><label><span>Thuật ngữ bổ sung</span><textarea value={glossary} onChange={(e) => setGlossary(e.target.value)} placeholder="Mỗi dòng một quy tắc thuật ngữ" /></label></section>}
+    {showOptions && <section className="translation-options browser-options"><label><span>{translationProvider === 'chatgpt' ? 'Link ChatGPT GPTs' : 'Link Gemini Gem'}</span><input value={translationProvider === 'chatgpt' ? gptUrl : gemUrl} onChange={(e) => translationProvider === 'chatgpt' ? setGptUrl(e.target.value) : setGemUrl(e.target.value)} placeholder={translationProvider === 'chatgpt' ? 'https://chatgpt.com/g/...' : 'https://gemini.google.com/gem/...'} /><small>Tool dùng một tab Chrome xuyên suốt Character Bible và toàn bộ chunk.</small></label>{translationProvider === 'gemini' ? <label><span>Lưu Gem mới</span><input value={newGemName} onChange={(e) => setNewGemName(e.target.value)} placeholder="Tên gợi nhớ cho Gem" /><button type="button" onClick={saveNewGem}>Lưu Gem mới</button></label> : <label><span>GPT đã cấu hình</span><input value="HHVietSub Translator" disabled /><small>GPTs đã có chỉ dẫn dịch riêng, không cần chọn model.</small></label>}<div className="gem-browser-actions"><button onClick={() => window.desktop?.loginTranslator(translationProvider)}>Đăng nhập {translationProvider === 'chatgpt' ? 'ChatGPT' : 'Google'}</button><button onClick={() => window.desktop?.openTranslator(translationProvider === 'chatgpt' ? gptUrl : gemUrl)}>Mở kiểm tra</button></div><label><span>Thuật ngữ bổ sung</span><textarea value={glossary} onChange={(e) => setGlossary(e.target.value)} placeholder="Mỗi dòng một quy tắc thuật ngữ" /></label></section>}
     <section className={`subtitle-table ${translating ? 'is-translating' : ''}`}><div className="subtitle-head"><span># / THỜI GIAN</span><span>NỘI DUNG GỐC</span><span>BẢN DỊCH TIẾNG VIỆT</span></div>{rows.length ? rows.map((row) => <div className={`subtitle-row ${row.translated.trim() ? 'translated' : 'missing'}`} key={row.id}><div><b>{String(row.id).padStart(2, '0')}</b><small>{row.start} → {row.end}</small></div><textarea value={row.source} disabled={translating} onChange={(e) => updateRow(row.id, 'source', e.target.value)} /><textarea className={row.translated.length > row.source.length * 1.8 ? 'length-warning' : ''} value={row.translated} placeholder={translating ? 'Đang chờ kết quả…' : 'Chưa dịch'} onChange={(e) => updateRow(row.id, 'translated', e.target.value)} /></div>) : <div className="subtitle-empty"><UploadCloud size={30} /><strong>Chưa có phụ đề</strong><small>Chọn file SRT để hiển thị nội dung tại đây.</small></div>}</section>
-    <div className="translation-footer"><div><strong>{message}</strong><small>Tool nạp toàn bộ Character Bible, chờ Gem xác nhận, rồi mới gửi tuần tự từng chunk dạng #id.</small></div><span className="shortcut-hint">Ctrl ↵ để dịch</span></div>
+    <div className="translation-footer"><div><strong>{message}</strong><small>Tool nạp toàn bộ Character Bible, chờ dịch vụ xác nhận, rồi mới gửi tuần tự từng chunk dạng #id trong cùng một cuộc trò chuyện.</small></div><span className="shortcut-hint">Ctrl ↵ để dịch</span></div>
   </div>;
 }
 

@@ -4,13 +4,20 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 type SubtitleInput = { id: number; text: string };
-type TranslationOptions = { gemUrl: string; modelName?: string; batchSize?: number; workers?: number; glossary?: string; characterBible?: string; entries: SubtitleInput[] };
+type TranslationProvider = 'gemini' | 'chatgpt';
+type TranslationOptions = { provider?: TranslationProvider; gemUrl?: string; gptUrl?: string; modelName?: string; batchSize?: number; workers?: number; glossary?: string; characterBible?: string; entries: SubtitleInput[] };
 type CdpTarget = { id: string; type: string; url: string; webSocketDebuggerUrl: string };
 
-const INPUT_SELECTORS = ["rich-textarea div[contenteditable='true']", "div.ProseMirror[contenteditable='true']", "textarea", "div[contenteditable='true']"];
-// Only read assistant turns. Generic conversation/message selectors also match
-// the user's prompt, which made source #id lines look like completed translations.
-const RESPONSE_SELECTORS = ["model-response"];
+const INPUT_SELECTORS: Record<TranslationProvider, string[]> = {
+  gemini: ["rich-textarea div[contenteditable='true']", "div.ProseMirror[contenteditable='true']", "textarea", "div[contenteditable='true']"],
+  chatgpt: ["#prompt-textarea", "div.ProseMirror[contenteditable='true']", "textarea[placeholder]", "div[contenteditable='true']"],
+};
+// Only read assistant turns. Generic message selectors also match the user's
+// prompt and can make source #id lines look like completed translations.
+const RESPONSE_SELECTORS: Record<TranslationProvider, string[]> = {
+  gemini: ["model-response"],
+  chatgpt: ['[data-message-author-role="assistant"]'],
+};
 
 class CdpSession {
   private socket: WebSocket;
@@ -158,6 +165,7 @@ export class GeminiCdpManager {
     return { opened: true, reused: false };
   }
   async login() { return this.open('https://accounts.google.com/'); }
+  async loginChatGpt() { return this.open('https://chatgpt.com/auth/login'); }
   cancel() { this.cancelled = true; this.paused = false; }
   setPaused(value: boolean) { this.paused = value; return { paused: value }; }
 
@@ -173,10 +181,10 @@ export class GeminiCdpManager {
     return this.requestJson<CdpTarget>(`/json/new?${encodeURIComponent(url)}`, 'PUT');
   }
 
-  private async waitReady(session: CdpSession) {
+  private async waitReady(session: CdpSession, provider: TranslationProvider) {
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
-      const ready = await session.evaluate(`document.readyState !== 'loading' && !!document.querySelector(${JSON.stringify(INPUT_SELECTORS.join(','))})`);
+      const ready = await session.evaluate(`document.readyState !== 'loading' && !!document.querySelector(${JSON.stringify(INPUT_SELECTORS[provider].join(','))})`);
       if (ready) return;
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
@@ -252,11 +260,11 @@ export class GeminiCdpManager {
   }
 
   private buildPrompt(chunk: SubtitleInput[], glossary: string) {
-    const rules = `Dịch từng block sang tiếng Việt. Giữ ánh xạ 1:1, không gộp hoặc tách block. Chỉ trả về: #1 bản dịch ; #2 bản dịch. Trả đủ, không thiếu không thừa.${glossary ? `\nThuật ngữ bắt buộc:\n${glossary}` : ''}`;
+    const rules = `Dịch từng block sang tiếng Việt. Giữ ánh xạ 1:1, không gộp hoặc tách block. Chỉ trả về: #1 bản dịch ; #2 bản dịch. Trả đủ, không thiếu không thừa. Block chỉ có số, ký hiệu, mã hoặc nội dung không cần dịch phải giữ nguyên sau #id, tuyệt đối không để trống.${glossary ? `\nThuật ngữ bắt buộc:\n${glossary}` : ''}`;
     return `${rules}\n\n${chunk.map((item) => `#${item.id} ${item.text.replace(/\s+/g, ' ').trim()}`).join(' ; ')}`;
   }
 
-  private async submit(session: CdpSession, prompt: string, requireSubtitleIds = true) {
+  private async submit(session: CdpSession, prompt: string, requireSubtitleIds = true, provider: TranslationProvider = 'gemini') {
     const releaseSubmitLock = await this.acquireSubmitLock();
     let previous = '';
     try {
@@ -264,9 +272,9 @@ export class GeminiCdpManager {
       // worker forward only for its short submit phase; generation then
       // continues concurrently in the background.
       await session.send('Page.bringToFront');
-    previous = await session.evaluate(`(() => { const a=[...document.querySelectorAll(${JSON.stringify(RESPONSE_SELECTORS.join(','))})].filter(e=>e.offsetParent); return a.at(-1)?.innerText?.trim()||'' })()`);
+    previous = await session.evaluate(`(() => { const a=[...document.querySelectorAll(${JSON.stringify(RESPONSE_SELECTORS[provider].join(','))})].filter(e=>e.offsetParent); return a.at(-1)?.innerText?.trim()||'' })()`);
     const setSuccess = await session.evaluate(`((p) => {
-      const sels=${JSON.stringify(INPUT_SELECTORS)};
+      const sels=${JSON.stringify(INPUT_SELECTORS[provider])};
       const el=sels.map(s=>[...document.querySelectorAll(s)].find(x=>x.offsetParent)).find(Boolean);
       if(!el) return false;
       el.focus();
@@ -288,7 +296,7 @@ export class GeminiCdpManager {
 
     // Fallback: If innerText wasn't filled, try Input.insertText
     const isFilled = await session.evaluate(`(() => {
-      const sels=${JSON.stringify(INPUT_SELECTORS)};
+      const sels=${JSON.stringify(INPUT_SELECTORS[provider])};
       const el=sels.map(s=>[...document.querySelectorAll(s)].find(x=>x.offsetParent)).find(Boolean);
       if(!el) return false;
       const text = ('value' in el ? el.value : el.innerText) || '';
@@ -299,7 +307,7 @@ export class GeminiCdpManager {
       await session.send('Input.insertText', { text: prompt });
       await new Promise((resolve) => setTimeout(resolve, 250));
       await session.evaluate(`(() => {
-        const sels=${JSON.stringify(INPUT_SELECTORS)};
+        const sels=${JSON.stringify(INPUT_SELECTORS[provider])};
         const el=sels.map(s=>[...document.querySelectorAll(s)].find(x=>x.offsetParent)).find(Boolean);
         if(el) {
           el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText' }));
@@ -316,7 +324,7 @@ export class GeminiCdpManager {
     while (!submitted && Date.now() < submitDeadline) {
       if (this.cancelled) throw new Error('Đã hủy dịch');
       const composer = await session.evaluate(`(() => {
-        const sels=${JSON.stringify(INPUT_SELECTORS)};
+        const sels=${JSON.stringify(INPUT_SELECTORS[provider])};
         const el=sels.map(s=>[...document.querySelectorAll(s)].find(x=>x.offsetParent)).find(Boolean);
         const draft=el ? ((('value' in el ? el.value : el.innerText) || '').trim()) : '';
         const selectors=['button.send-button','button.send-button-v2','.send-button-container button','button[data-test-id*="send" i]','button[aria-label*="send" i]','button[aria-label*="gửi" i]','button[aria-label*="submit" i]'];
@@ -335,10 +343,10 @@ export class GeminiCdpManager {
       await session.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: position.x, y: position.y, button: 'left', clickCount: 1 });
       await new Promise((resolve) => setTimeout(resolve, 650));
       submitted = await session.evaluate(`(() => {
-        const sels=${JSON.stringify(INPUT_SELECTORS)};
+        const sels=${JSON.stringify(INPUT_SELECTORS[provider])};
         const el=sels.map(s=>[...document.querySelectorAll(s)].find(x=>x.offsetParent)).find(Boolean);
         const draft=el ? ((('value' in el ? el.value : el.innerText) || '').trim()) : '';
-        const responses=[...document.querySelectorAll(${JSON.stringify(RESPONSE_SELECTORS.join(','))})].filter(e=>e.offsetParent);
+        const responses=[...document.querySelectorAll(${JSON.stringify(RESPONSE_SELECTORS[provider].join(','))})].filter(e=>e.offsetParent);
         const latest=responses.at(-1)?.innerText?.trim()||'';
         const generating=[...document.querySelectorAll('button')].some(e=>e.offsetParent&&/stop|dừng/i.test((e.getAttribute('aria-label')||e.textContent||'')));
         return draft.length===0 || latest!==${JSON.stringify(previous)} || generating;
@@ -353,7 +361,7 @@ export class GeminiCdpManager {
     while (Date.now() < deadline) {
       if (this.cancelled) throw new Error('Đã hủy dịch');
       while (this.paused && !this.cancelled) await new Promise((resolve) => setTimeout(resolve, 300));
-      const state = await session.evaluate(`(() => { const a=[...document.querySelectorAll(${JSON.stringify(RESPONSE_SELECTORS.join(','))})].filter(e=>e.offsetParent); const text=a.at(-1)?.innerText?.trim()||''; const generating=[...document.querySelectorAll('button')].some(e=>e.offsetParent&&/stop|dừng/i.test((e.getAttribute('aria-label')||e.textContent||''))); return {text,generating} })()`);
+      const state = await session.evaluate(`(() => { const a=[...document.querySelectorAll(${JSON.stringify(RESPONSE_SELECTORS[provider].join(','))})].filter(e=>e.offsetParent); const text=a.at(-1)?.innerText?.trim()||''; const generating=[...document.querySelectorAll('button')].some(e=>e.offsetParent&&/stop|dừng/i.test((e.getAttribute('aria-label')||e.textContent||''))); return {text,generating} })()`);
       if (state.text && state.text !== previous && (!requireSubtitleIds || /#\s*\d+/.test(state.text))) {
         stable = state.text === last ? stable + 1 : 0; last = state.text;
         if (!state.generating && stable >= 2) return state.text;
@@ -382,36 +390,42 @@ export class GeminiCdpManager {
   async translate(options: TranslationOptions) {
     if (!options.entries?.length) throw new Error('Không có phụ đề để dịch');
     if (!options.characterBible?.trim()) throw new Error('Chưa chọn hoặc Character Bible đang trống');
-    if (!options.gemUrl?.startsWith('https://gemini.google.com/')) throw new Error('Link Gem không hợp lệ');
+    const provider: TranslationProvider = options.provider === 'chatgpt' ? 'chatgpt' : 'gemini';
+    const requestedUrl = provider === 'chatgpt' ? options.gptUrl : options.gemUrl;
+    if (provider === 'chatgpt' && !requestedUrl?.startsWith('https://chatgpt.com/g/')) throw new Error('Link GPTs không hợp lệ');
+    if (provider === 'gemini' && !requestedUrl?.startsWith('https://gemini.google.com/')) throw new Error('Link Gem không hợp lệ');
+    const serviceUrl = requestedUrl as string;
     this.cancelled = false; this.paused = false;
-    await this.ensureChrome(options.gemUrl);
-    const batchSize = Math.max(1, Math.min(300, options.batchSize || 200));
+    await this.ensureChrome(serviceUrl);
+    const batchSize = Math.max(1, Math.min(300, options.batchSize || 100));
     // Gemini UI automation is most reliable with one foreground tab. Keep
     // chunks sequential so prompts and responses cannot cross between tabs.
     const workers = 1;
     const chunks = Array.from({ length: Math.ceil(options.entries.length / batchSize) }, (_, i) => options.entries.slice(i * batchSize, i * batchSize + batchSize));
     const openTargets = await this.requestJson<CdpTarget[]>('/json');
-    const geminiTargets = openTargets.filter((target) => {
+    const serviceHost = new URL(serviceUrl).hostname;
+    const serviceTargets = openTargets.filter((target) => {
       if (target.type !== 'page' || !target.webSocketDebuggerUrl) return false;
-      try { return new URL(target.url).hostname === 'gemini.google.com'; } catch { return false; }
+      try { return new URL(target.url).hostname === serviceHost; } catch { return false; }
     });
-    const reusable = geminiTargets.slice(0, workers);
+    const reusable = serviceTargets.slice(0, workers);
     const missingWorkers = workers - reusable.length;
     const created = missingWorkers > 0
-      ? await Promise.all(Array.from({ length: missingWorkers }, () => this.createTarget(options.gemUrl)))
+      ? await Promise.all(Array.from({ length: missingWorkers }, () => this.createTarget(serviceUrl)))
       : [];
     const targets = [...reusable, ...created];
     const sessions = targets.map((target) => new CdpSession(target.webSocketDebuggerUrl));
     await Promise.all(sessions.map((session, index) =>
-      reusable[index] && reusable[index].url !== options.gemUrl
-        ? session.send('Page.navigate', { url: options.gemUrl })
+      reusable[index] && reusable[index].url !== serviceUrl
+        ? session.send('Page.navigate', { url: serviceUrl })
         : Promise.resolve()
     ));
-    await Promise.all(sessions.map((session) => this.waitReady(session)));
+    await Promise.all(sessions.map((session) => this.waitReady(session, provider)));
     const results = new Map<number, string>(); let cursor = 0; let done = 0;
     let completed = false;
     try {
-    await this.selectModel(sessions[0], options.modelName);
+    if (provider === 'gemini') await this.selectModel(sessions[0], options.modelName);
+    else this.notify({ event: 'translation.model', data: { model: 'HHVietSub Translator', provider, state: 'ready' } });
     this.notify({ event: 'translation.started', data: { total: chunks.length, entries: options.entries.length, workers } });
     this.notify({ event: 'translation.bible', data: { state: 'loading', characters: options.characterBible.length } });
     const biblePrompt = [
@@ -423,11 +437,11 @@ export class GeminiCdpManager {
       options.characterBible.trim(),
       '--- HẾT CHARACTER BIBLE ---',
     ].join('\n');
-    const bibleResponse = await this.submit(sessions[0], biblePrompt, false);
+    const bibleResponse = await this.submit(sessions[0], biblePrompt, false, provider);
     const normalizedBibleResponse = bibleResponse.replace(/[–—]/g, '—').replace(/\s+/g, ' ').trim();
     const expectedBibleAck = 'Đã nạp Character Bible — sẵn sàng nhận chunk để dịch.';
     if (!normalizedBibleResponse.includes(expectedBibleAck)) {
-      throw new Error(`Gem chưa xác nhận Character Bible đúng yêu cầu. Phản hồi: ${bibleResponse.slice(0, 500)}`);
+      throw new Error(`${provider === 'chatgpt' ? 'GPTs' : 'Gem'} chưa xác nhận Character Bible đúng yêu cầu. Phản hồi: ${bibleResponse.slice(0, 500)}`);
     }
     this.notify({ event: 'translation.bible', data: { state: 'ready', message: expectedBibleAck } });
     const runWorker = async (session: CdpSession, worker: number) => {
@@ -437,8 +451,18 @@ export class GeminiCdpManager {
         for (let attempt = 1; attempt <= 3 && pending.length; attempt++) {
           this.notify({ event: 'translation.progress', data: { done, total: chunks.length, chunk: index + 1, worker: worker + 1, attempt } });
           try {
-            const raw = await this.submit(session, this.buildPrompt(pending, options.glossary || ''));
+            const raw = await this.submit(session, this.buildPrompt(pending, options.glossary || ''), true, provider);
             const parsed = this.parse(raw, pending.map((item) => item.id));
+            // Number/symbol-only blocks do not need translation. Some chat UIs
+            // return the #id but leave its value blank, which previously caused
+            // three pointless retries and stopped the entire job.
+            for (const item of pending) {
+              if (!parsed.result.has(item.id) && !/[\p{Script=Han}\p{L}]/u.test(item.text)) {
+                parsed.result.set(item.id, item.text.trim());
+                const missingIndex = parsed.missing.indexOf(item.id);
+                if (missingIndex >= 0) parsed.missing.splice(missingIndex, 1);
+              }
+            }
             for (const [id, value] of parsed.result) results.set(id, value);
             if (parsed.result.size) {
               this.notify({ event: 'translation.result', data: { chunk: index + 1, worker: worker + 1,
@@ -451,7 +475,7 @@ export class GeminiCdpManager {
               attempt: attempt + 1, message: error instanceof Error ? error.message : String(error) } });
           }
         }
-        if (pending.length) throw new Error(`Gemini thiếu ${pending.length} câu ở chunk ${index + 1}`);
+        if (pending.length) throw new Error(`${provider === 'chatgpt' ? 'GPTs' : 'Gemini'} thiếu ${pending.length} câu ở chunk ${index + 1}`);
         done++; this.notify({ event: 'translation.progress', data: { done, total: chunks.length, chunk: index + 1, worker: worker + 1 } });
       }
     };

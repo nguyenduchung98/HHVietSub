@@ -11,7 +11,7 @@ def main() -> int:
     args = parser.parse_args()
 
     import torch
-    from omnivoice.models.omnivoice import OmniVoice
+    from omnivoice import OmniVoice
 
     profile_path = args.voice_dir / "profile.json"
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
@@ -33,11 +33,14 @@ def main() -> int:
     )
     prompt_path = args.voice_dir / str(profile.get("voice_prompt", "voice.pt"))
     temporary = prompt_path.with_suffix(".pt.tmp")
-    torch.save({
-        "ref_audio_tokens": prompt.ref_audio_tokens.cpu(),
-        "ref_text": prompt.ref_text,
-        "ref_rms": prompt.ref_rms,
-    }, temporary)
+    if hasattr(prompt, "save"):
+        prompt.save(str(temporary))
+    else:
+        torch.save({
+            "ref_audio_tokens": prompt.ref_audio_tokens.cpu(),
+            "ref_text": prompt.ref_text,
+            "ref_rms": prompt.ref_rms,
+        }, temporary)
     temporary.replace(prompt_path)
     if not ref_text and prompt.ref_text:
         text_path.write_text(str(prompt.ref_text), encoding="utf-8")

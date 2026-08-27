@@ -15,6 +15,11 @@ contextBridge.exposeInMainWorld('desktop', {
   loginGem: () => ipcRenderer.invoke('gemini:login'),
   cancelGem: () => ipcRenderer.invoke('gemini:cancel'),
   pauseGem: (paused: boolean) => ipcRenderer.invoke('gemini:pause', paused),
+  translateWithBrowser: (params: unknown) => ipcRenderer.invoke('translator:translate', params),
+  openTranslator: (url: string) => ipcRenderer.invoke('translator:open', url),
+  loginTranslator: (provider: 'gemini' | 'chatgpt') => ipcRenderer.invoke('translator:login', provider),
+  cancelTranslation: () => ipcRenderer.invoke('translator:cancel'),
+  pauseTranslation: (paused: boolean) => ipcRenderer.invoke('translator:pause', paused),
   onBackendEvent: (handler: (event: unknown) => void) => {
     const listener = (_: unknown, event: unknown) => handler(event);
     ipcRenderer.on('backend:event', listener);

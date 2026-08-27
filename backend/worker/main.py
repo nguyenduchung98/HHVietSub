@@ -79,7 +79,7 @@ class Worker:
         self.ffmpeg_sync_lock = threading.Lock()
         self.gemini_translation = GeminiTranslationService(LEGACY_CAPCUT)
         self.voice_studio = VoiceStudioService(
-            self.user_data, APP_ROOT, LEGACY_OMNIVOICE, self._voice_config, self._remote_generate
+            self.user_data, APP_ROOT, LEGACY_OMNIVOICE, self._voice_config, self._remote_generate, emit
         )
         self.routes: dict[str, Callable[[dict[str, Any]], Any]] = {
             "system.ping": self.ping,
@@ -655,6 +655,9 @@ class Worker:
                 self.srt_jobs.remove(job_params["jobId"])
         if engine != "omnivoice":
             raise ValueError("Mô hình tạo giọng không hợp lệ")
+        # The Studio runtime keeps OmniVoice resident in VRAM. Release it before
+        # starting the dedicated SRT batch worker so the model is never loaded twice.
+        self.voice_studio.unload_runtime()
         if self._voice_config()["mode"] == "local" and not self._is_model_downloaded("k2-fsa/OmniVoice"):
             raise RuntimeError("Chưa tải Model OmniVoice cục bộ! Vui lòng vào Cấu hình ⚙️ ➔ Tải Model để bắt đầu tạo giọng.")
         # Tạo từ SRT dùng OmniVoice cục bộ; Colab không được chọn ngầm từ cấu hình chung.
@@ -741,6 +744,7 @@ class Worker:
             "seed": params.get("seed"), "denoise": bool(params.get("denoise", False)),
             "postprocess": bool(params.get("postprocess", True)),
             "skipExisting": bool(params.get("skipExisting", True)),
+            "batchSize": max(1, min(16, int(params.get("omniBatchSize", 4)))),
         }
         job_path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
         job_id = str(params.get("jobId") or f"srt-{int(time.time() * 1000)}")
